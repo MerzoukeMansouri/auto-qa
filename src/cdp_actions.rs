@@ -4,6 +4,85 @@ use chromiumoxide::cdp::browser_protocol::input::{
 };
 use chromiumoxide::keys::get_key_definition;
 use chromiumoxide::Page;
+use serde::Deserialize;
+
+#[derive(Deserialize, Clone)]
+pub struct ElementInfo {
+    pub selector: Option<String>,
+    pub tag: String,
+    pub text: String,
+}
+
+/// Builds a selector for `el`: id > data-testid family > class > nth-child
+/// CSS path. Every tier is uniqueness-checked with an actual
+/// `querySelectorAll(...).length === 1` before being accepted — never a guess,
+/// never XPath. The nth-child path fallback always succeeds.
+const SELECTOR_BUILDER_JS: &str = r#"
+function cuaBuildSelector(el) {
+  function unique(sel) {
+    try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
+  }
+  if (el.id) {
+    const sel = '#' + CSS.escape(el.id);
+    if (unique(sel)) return sel;
+  }
+  for (const attr of ['data-testid', 'data-test', 'data-cy', 'data-qa']) {
+    const v = el.getAttribute(attr);
+    if (v) {
+      const sel = '[' + attr + '="' + CSS.escape(v) + '"]';
+      if (unique(sel)) return sel;
+    }
+  }
+  if (el.className && typeof el.className === 'string') {
+    const hashLike = /^[a-z0-9_-]{6,}$/;
+    const cls = el.className.split(/\s+/).filter(c => c && !hashLike.test(c));
+    if (cls.length) {
+      const sel = el.tagName.toLowerCase() + '.' + cls.map(c => CSS.escape(c)).join('.');
+      if (unique(sel)) return sel;
+    }
+  }
+  let path = [];
+  let node = el;
+  while (node && node.nodeType === 1 && node.tagName !== 'BODY') {
+    const parent = node.parentElement;
+    if (!parent) break;
+    const idx = Array.from(parent.children).indexOf(node) + 1;
+    path.unshift(node.tagName.toLowerCase() + ':nth-child(' + idx + ')');
+    node = parent;
+    if (unique(path.join(' > '))) break;
+  }
+  return path.length ? path.join(' > ') : null;
+}
+function cuaDescribe(el) {
+  if (!el) return null;
+  return {
+    selector: cuaBuildSelector(el),
+    tag: el.tagName.toLowerCase(),
+    text: (el.textContent || '').trim().slice(0, 80),
+  };
+}
+"#;
+
+pub async fn describe_element_at(page: &Page, x: f64, y: f64) -> anyhow::Result<Option<ElementInfo>> {
+    // Wrapped in an IIFE starting with `(` — chromiumoxide's `evaluate` peeks
+    // at the string to guess expression-vs-function, and a snippet starting
+    // with the bare `function` keyword gets misdetected as a callable and
+    // wrapped again, producing a syntax error. `(function(){...})()` reads
+    // as a plain expression.
+    let js = format!(
+        "(function(){{ {SELECTOR_BUILDER_JS}\nreturn cuaDescribe(document.elementFromPoint({x}, {y})); }})()"
+    );
+    let info = page.evaluate(js).await?.into_value::<Option<ElementInfo>>()?;
+    Ok(info)
+}
+
+pub async fn describe_active_element(page: &Page) -> anyhow::Result<Option<ElementInfo>> {
+    let js = format!(
+        "(function(){{ {SELECTOR_BUILDER_JS}\nreturn cuaDescribe(document.activeElement); }})()"
+    );
+    let info = page.evaluate(js).await?.into_value::<Option<ElementInfo>>()?;
+    Ok(info)
+}
 
 /// chromiumoxide's key table is looked up by exact-case `KeyboardEvent.key`
 /// name (e.g. "Control", "Enter") — normalize common lowercase aliases to it.

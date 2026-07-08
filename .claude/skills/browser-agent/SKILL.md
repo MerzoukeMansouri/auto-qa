@@ -7,6 +7,8 @@ description: Drive a real Chrome browser via the `cua` CLI — click, type, scro
 
 You control a real Chrome browser through the `cua` command-line tool (run it with Bash — build it once with `cargo build --release` in this project if `target/release/cua` doesn't exist yet, then invoke it as `./target/release/cua`). Every `cua` action command (all except `cua screenshot`) performs an action AND returns the resulting page state as JSON on stdout — `{"url": ..., "screenshot_path": ..., "viewport": [w, h]}` — so you see the effect immediately without a separate screenshot call.
 
+**Do not use `WebSearch`, `WebFetch`, or any other tool to answer the task instead of the browser.** Once this skill is invoked, the task is "browse like a human" — open the page yourself, look at the screenshot, click, type, scroll, read what's rendered. Answering from a search snippet instead of the actual page defeats the purpose of this skill and produces nothing for `cua review`/`cua codegen` to turn into a test. If the task can be answered without touching a browser at all, that's a sign this skill shouldn't have been invoked — but once it has been, finish it through `cua`, not around it.
+
 Note: the binary is named `cua`, not `cu` — `cu` is a preexisting Unix command (serial dial-out utility) on most systems and would silently run the wrong program.
 
 ## Coordinate system

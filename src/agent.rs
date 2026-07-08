@@ -32,6 +32,12 @@ pub async fn cmd_run(query: &str) -> anyhow::Result<()> {
         .arg(query)
         .arg("--allowedTools")
         .arg("Bash,Read")
+        // Belt-and-suspenders: --allowedTools alone didn't stop the model
+        // from reaching for WebSearch instead of actually driving the
+        // browser (observed in practice) — explicitly deny the tools that
+        // let it answer the task without touching `cua` at all.
+        .arg("--disallowedTools")
+        .arg("WebSearch,WebFetch")
         .arg("--permission-mode")
         .arg("acceptEdits")
         // Emits one NDJSON event per step (thinking, each tool call incl.

@@ -91,4 +91,14 @@ pub enum Commands {
         #[arg(long)]
         query: String,
     },
+    /// Generate a Playwright .spec.ts from ~/.cu-agent/actions.json.
+    Codegen {
+        #[arg(long, default_value = "cua-generated.spec.ts")]
+        out: String,
+    },
+    /// Open the local review UI for the current session's actions.json.
+    Review {
+        #[arg(long, default_value_t = 4321)]
+        port: u16,
+    },
 }

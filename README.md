@@ -48,6 +48,32 @@ skill. Requires `jq` (`brew install jq`) — used to turn Claude's raw NDJSON
 event stream into readable step-by-step output (thinking, each tool call,
 tool results, final answer) instead of a wall of raw JSON.
 
+## Playwright test generation
+
+Every action `cua` executes (whether run by hand or via `cua run`) is
+captured with a DOM selector and a per-action screenshot into
+`~/.cu-agent/actions.json`. Review and edit that session, then generate a
+Playwright test from it:
+
+```
+cua review              # opens a local dark-themed UI at localhost:4321
+                         # — edit/delete actions, add assertions, click Validate
+```
+
+`cua review` needs the UI built once: `cd web && npm install && npm run build`.
+
+Or skip the UI entirely for scripting/CI:
+
+```
+cua codegen --out my-test.spec.ts   # reads actions.json directly, no UI/browser needed
+```
+
+Selectors are picked `#id` > `[data-testid=...]` (also `data-test`/`data-cy`/
+`data-qa`) > `.class` > a CSS `nth-child` path — never XPath — each tier
+verified unique against the live DOM at capture time. Assertions: an
+`await expect(page).toHaveURL(...)` is auto-inserted after every navigation;
+add your own `visible`/`text`/`value` checks per-element from the review UI.
+
 ## Explicitly descoped (vs. the Python reference)
 
 Documented here rather than silently dropped:
