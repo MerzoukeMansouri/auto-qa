@@ -24,7 +24,8 @@ loop of its own.
 Install via Homebrew:
 
 ```
-brew install MerzoukeMansouri/homebrew/cua
+brew tap MerzoukeMansouri/homebrew
+brew install cua
 ```
 
 Standalone CLI, one Chrome session at a time (state lives in `~/.cu-agent/`):
@@ -43,11 +44,13 @@ Full end-to-end, letting Claude Code drive it via the skill:
 cua run --query "go to example.com and tell me the page title"
 ```
 
-`cua run` must be invoked from inside this project directory (or a directory
-with its own `.claude/skills/browser-agent/`) so Claude Code discovers the
-skill. Requires `jq` (`brew install jq`) — used to turn Claude's raw NDJSON
-event stream into readable step-by-step output (thinking, each tool call,
-tool results, final answer) instead of a wall of raw JSON.
+`cua run` needs the `browser-agent` Claude Code Skill so Claude discovers how
+to drive `cua`. Copy `.claude/skills/browser-agent/` from this repo into the
+`.claude/skills/` of the directory you run `cua run` from (or `~/.claude/skills/`
+to make it available everywhere) — a Homebrew install of `cua` does not
+include it. Also requires `jq` (`brew install jq`) — used to turn Claude's raw
+NDJSON event stream into readable step-by-step output (thinking, each tool
+call, tool results, final answer) instead of a wall of raw JSON.
 
 ### Playwright test generation
 

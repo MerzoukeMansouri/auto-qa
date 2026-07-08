@@ -18,7 +18,7 @@ jobs:
     with:
       binary_name: cua
       repo: MerzoukeMansouri/cu-agent
-      formula_class: CuAgent
+      formula_class: Cua
       formula_desc: "Drive a real Chrome browser via CDP from the CLI"
     secrets:
       TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
