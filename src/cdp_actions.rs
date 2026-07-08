@@ -63,7 +63,11 @@ function cuaDescribe(el) {
 }
 "#;
 
-pub async fn describe_element_at(page: &Page, x: f64, y: f64) -> anyhow::Result<Option<ElementInfo>> {
+pub async fn describe_element_at(
+    page: &Page,
+    x: f64,
+    y: f64,
+) -> anyhow::Result<Option<ElementInfo>> {
     // Wrapped in an IIFE starting with `(` — chromiumoxide's `evaluate` peeks
     // at the string to guess expression-vs-function, and a snippet starting
     // with the bare `function` keyword gets misdetected as a callable and
@@ -72,7 +76,10 @@ pub async fn describe_element_at(page: &Page, x: f64, y: f64) -> anyhow::Result<
     let js = format!(
         "(function(){{ {SELECTOR_BUILDER_JS}\nreturn cuaDescribe(document.elementFromPoint({x}, {y})); }})()"
     );
-    let info = page.evaluate(js).await?.into_value::<Option<ElementInfo>>()?;
+    let info = page
+        .evaluate(js)
+        .await?
+        .into_value::<Option<ElementInfo>>()?;
     Ok(info)
 }
 
@@ -80,7 +87,10 @@ pub async fn describe_active_element(page: &Page) -> anyhow::Result<Option<Eleme
     let js = format!(
         "(function(){{ {SELECTOR_BUILDER_JS}\nreturn cuaDescribe(document.activeElement); }})()"
     );
-    let info = page.evaluate(js).await?.into_value::<Option<ElementInfo>>()?;
+    let info = page
+        .evaluate(js)
+        .await?
+        .into_value::<Option<ElementInfo>>()?;
     Ok(info)
 }
 

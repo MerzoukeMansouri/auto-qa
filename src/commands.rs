@@ -170,7 +170,12 @@ pub async fn cmd_action(command: Commands) -> anyhow::Result<()> {
             entry.seconds = Some(seconds);
             cdp_actions::wait(seconds).await?;
         }
-        Commands::Screenshot | Commands::Open { .. } | Commands::Close | Commands::Run { .. } | Commands::Codegen { .. } | Commands::Review { .. } => {
+        Commands::Screenshot
+        | Commands::Open { .. }
+        | Commands::Close
+        | Commands::Run { .. }
+        | Commands::Codegen { .. }
+        | Commands::Review { .. } => {
             unreachable!()
         }
     }
@@ -199,9 +204,12 @@ fn action_kind(command: &Commands) -> &'static str {
         Commands::Back => "back",
         Commands::Forward => "forward",
         Commands::Wait { .. } => "wait",
-        Commands::Screenshot | Commands::Open { .. } | Commands::Close | Commands::Run { .. } | Commands::Codegen { .. } | Commands::Review { .. } => {
-            "unknown"
-        }
+        Commands::Screenshot
+        | Commands::Open { .. }
+        | Commands::Close
+        | Commands::Run { .. }
+        | Commands::Codegen { .. }
+        | Commands::Review { .. } => "unknown",
     }
 }
 

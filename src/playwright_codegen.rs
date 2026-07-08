@@ -46,7 +46,11 @@ pub fn generate(entries: &[ActionEntry]) -> String {
                                 "  await page.hover('{}'); // middle-click has no Playwright locator method",
                                 esc(sel)
                             ));
-                            format!("page.mouse.click({}, {}, {{ button: 'middle' }})", e.x.unwrap_or(0.0), e.y.unwrap_or(0.0))
+                            format!(
+                                "page.mouse.click({}, {}, {{ button: 'middle' }})",
+                                e.x.unwrap_or(0.0),
+                                e.y.unwrap_or(0.0)
+                            )
                         }
                         _ => format!("page.click('{}')", esc(sel)),
                     };

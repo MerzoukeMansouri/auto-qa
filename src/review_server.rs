@@ -1,7 +1,6 @@
 use crate::{action_entry::ActionEntry, playwright_codegen, state};
 use axum::{
-    body::Body, extract::Path, http::StatusCode, response::IntoResponse, routing::get, Json,
-    Router,
+    body::Body, extract::Path, http::StatusCode, response::IntoResponse, routing::get, Json, Router,
 };
 use rust_embed::RustEmbed;
 
