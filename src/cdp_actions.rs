@@ -1,6 +1,6 @@
 use chromiumoxide::cdp::browser_protocol::input::{
-    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams,
-    DispatchMouseEventType, InsertTextParams, MouseButton,
+    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
+    InsertTextParams, MouseButton,
 };
 use chromiumoxide::keys::get_key_definition;
 use chromiumoxide::Page;
@@ -64,9 +64,31 @@ async fn mouse_event(
     Ok(())
 }
 
-async fn click_n(page: &Page, x: f64, y: f64, button: MouseButton, count: i64) -> anyhow::Result<()> {
-    mouse_event(page, x, y, DispatchMouseEventType::MousePressed, button.clone(), count).await?;
-    mouse_event(page, x, y, DispatchMouseEventType::MouseReleased, button, count).await?;
+async fn click_n(
+    page: &Page,
+    x: f64,
+    y: f64,
+    button: MouseButton,
+    count: i64,
+) -> anyhow::Result<()> {
+    mouse_event(
+        page,
+        x,
+        y,
+        DispatchMouseEventType::MousePressed,
+        button.clone(),
+        count,
+    )
+    .await?;
+    mouse_event(
+        page,
+        x,
+        y,
+        DispatchMouseEventType::MouseReleased,
+        button,
+        count,
+    )
+    .await?;
     Ok(())
 }
 
@@ -91,31 +113,85 @@ pub async fn middle_click(page: &Page, x: f64, y: f64) -> anyhow::Result<()> {
 }
 
 pub async fn mouse_down(page: &Page, x: f64, y: f64) -> anyhow::Result<()> {
-    mouse_event(page, x, y, DispatchMouseEventType::MousePressed, MouseButton::Left, 1).await
+    mouse_event(
+        page,
+        x,
+        y,
+        DispatchMouseEventType::MousePressed,
+        MouseButton::Left,
+        1,
+    )
+    .await
 }
 
 pub async fn mouse_up(page: &Page, x: f64, y: f64) -> anyhow::Result<()> {
-    mouse_event(page, x, y, DispatchMouseEventType::MouseReleased, MouseButton::Left, 1).await
+    mouse_event(
+        page,
+        x,
+        y,
+        DispatchMouseEventType::MouseReleased,
+        MouseButton::Left,
+        1,
+    )
+    .await
 }
 
 pub async fn hover(page: &Page, x: f64, y: f64) -> anyhow::Result<()> {
-    mouse_event(page, x, y, DispatchMouseEventType::MouseMoved, MouseButton::None, 0).await
+    mouse_event(
+        page,
+        x,
+        y,
+        DispatchMouseEventType::MouseMoved,
+        MouseButton::None,
+        0,
+    )
+    .await
 }
 
 pub async fn drag(page: &Page, x1: f64, y1: f64, x2: f64, y2: f64) -> anyhow::Result<()> {
-    mouse_event(page, x1, y1, DispatchMouseEventType::MousePressed, MouseButton::Left, 1).await?;
+    mouse_event(
+        page,
+        x1,
+        y1,
+        DispatchMouseEventType::MousePressed,
+        MouseButton::Left,
+        1,
+    )
+    .await?;
     // A couple of intermediate moves for drag-sensitive UI that ignores a single jump.
     let steps = 5;
     for i in 1..=steps {
         let t = i as f64 / steps as f64;
         let x = x1 + (x2 - x1) * t;
         let y = y1 + (y2 - y1) * t;
-        mouse_event(page, x, y, DispatchMouseEventType::MouseMoved, MouseButton::Left, 0).await?;
+        mouse_event(
+            page,
+            x,
+            y,
+            DispatchMouseEventType::MouseMoved,
+            MouseButton::Left,
+            0,
+        )
+        .await?;
     }
-    mouse_event(page, x2, y2, DispatchMouseEventType::MouseReleased, MouseButton::Left, 1).await
+    mouse_event(
+        page,
+        x2,
+        y2,
+        DispatchMouseEventType::MouseReleased,
+        MouseButton::Left,
+        1,
+    )
+    .await
 }
 
-pub async fn scroll(page: &Page, x: f64, y: f64, direction: &str, magnitude: f64) -> anyhow::Result<()> {
+pub async fn scroll(
+    page: &Page,
+    x: f64,
+    y: f64,
+    direction: &str,
+    magnitude: f64,
+) -> anyhow::Result<()> {
     let (delta_x, delta_y) = match direction {
         "up" => (0.0, -magnitude),
         "down" => (0.0, magnitude),
@@ -180,7 +256,9 @@ async fn press_key_with_modifiers(page: &Page, key: &str, modifiers: i64) -> any
 /// Presses a single key or a `+`-joined combo (e.g. "control+a", "Enter").
 pub async fn key(page: &Page, combo: &str) -> anyhow::Result<()> {
     let parts: Vec<&str> = combo.split('+').map(str::trim).collect();
-    let (main_key, modifier_keys) = parts.split_last().ok_or_else(|| anyhow::anyhow!("empty key combo"))?;
+    let (main_key, modifier_keys) = parts
+        .split_last()
+        .ok_or_else(|| anyhow::anyhow!("empty key combo"))?;
     let modifiers: i64 = modifier_keys.iter().map(|m| modifier_bit(m)).sum();
 
     for m in modifier_keys {
@@ -205,7 +283,8 @@ pub async fn key_down(page: &Page, key: &str) -> anyhow::Result<()> {
     if let Some(txt) = def.text {
         builder = builder.text(txt);
     }
-    page.execute(builder.build().map_err(|e| anyhow::anyhow!(e))?).await?;
+    page.execute(builder.build().map_err(|e| anyhow::anyhow!(e))?)
+        .await?;
     Ok(())
 }
 
@@ -218,7 +297,8 @@ pub async fn key_up(page: &Page, key: &str) -> anyhow::Result<()> {
         .code(def.code)
         .windows_virtual_key_code(def.key_code)
         .native_virtual_key_code(def.key_code);
-    page.execute(builder.build().map_err(|e| anyhow::anyhow!(e))?).await?;
+    page.execute(builder.build().map_err(|e| anyhow::anyhow!(e))?)
+        .await?;
     Ok(())
 }
 
@@ -255,4 +335,28 @@ pub async fn forward(page: &Page) -> anyhow::Result<()> {
 pub async fn wait(seconds: u64) -> anyhow::Result<()> {
     tokio::time::sleep(std::time::Duration::from_secs(seconds)).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_key_name_normalizes_aliases() {
+        assert_eq!(canonical_key_name("ctrl"), "Control");
+        assert_eq!(canonical_key_name("CMD"), "Meta");
+        assert_eq!(canonical_key_name("esc"), "Escape");
+        assert_eq!(canonical_key_name("arrowup"), "ArrowUp");
+        assert_eq!(canonical_key_name("space"), " ");
+        assert_eq!(canonical_key_name("a"), "a");
+    }
+
+    #[test]
+    fn modifier_bit_matches_dispatchkeyevent_bitmask() {
+        assert_eq!(modifier_bit("alt"), 1);
+        assert_eq!(modifier_bit("ctrl"), 2);
+        assert_eq!(modifier_bit("cmd"), 4);
+        assert_eq!(modifier_bit("shift"), 8);
+        assert_eq!(modifier_bit("unknown"), 0);
+    }
 }

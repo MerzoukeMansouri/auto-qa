@@ -67,7 +67,9 @@ async fn cmd_open(url: Option<&str>) -> anyhow::Result<()> {
 
 async fn cmd_close() -> anyhow::Result<()> {
     if let Some(pid) = state::pid() {
-        let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
     }
     if let Some(dir) = state::read("user-data-dir") {
         let _ = std::fs::remove_dir_all(dir);
@@ -108,9 +110,12 @@ async fn cmd_action(command: Commands) -> anyhow::Result<()> {
         Commands::Key { combo } => cdp_actions::key(&page, &combo).await?,
         Commands::KeyDown { key } => cdp_actions::key_down(&page, &key).await?,
         Commands::KeyUp { key } => cdp_actions::key_up(&page, &key).await?,
-        Commands::Scroll { x, y, direction, magnitude } => {
-            cdp_actions::scroll(&page, x, y, &direction, magnitude).await?
-        }
+        Commands::Scroll {
+            x,
+            y,
+            direction,
+            magnitude,
+        } => cdp_actions::scroll(&page, x, y, &direction, magnitude).await?,
         Commands::Navigate { url } => cdp_actions::navigate(&page, &url).await?,
         Commands::Back => cdp_actions::back(&page).await?,
         Commands::Forward => cdp_actions::forward(&page).await?,

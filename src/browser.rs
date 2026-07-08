@@ -77,7 +77,11 @@ pub async fn set_viewport(page: &Page, width: u32, height: u32) -> anyhow::Resul
 pub async fn detach(browser: &Browser, page: &Page) -> anyhow::Result<()> {
     use chromiumoxide::cdp::browser_protocol::target::DetachFromTargetParams;
     let _ = browser
-        .execute(DetachFromTargetParams::builder().session_id(page.session_id().clone()).build())
+        .execute(
+            DetachFromTargetParams::builder()
+                .session_id(page.session_id().clone())
+                .build(),
+        )
         .await;
     Ok(())
 }
@@ -155,7 +159,14 @@ pub async fn wait_for_http_ready(port: u16, timeout: Duration) -> anyhow::Result
     let deadline = std::time::Instant::now() + timeout;
     loop {
         let ok = std::process::Command::new("curl")
-            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", &format!("http://localhost:{port}/json/version")])
+            .args([
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                &format!("http://localhost:{port}/json/version"),
+            ])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "200")
             .unwrap_or(false);
@@ -179,11 +190,18 @@ pub async fn wait_for_http_ready(port: u16, timeout: Duration) -> anyhow::Result
 /// opened by hand.
 pub fn create_page_via_http(port: u16, url: &str) -> anyhow::Result<String> {
     let output = std::process::Command::new("curl")
-        .args(["-s", "-X", "PUT", &format!("http://localhost:{port}/json/new?{url}")])
+        .args([
+            "-s",
+            "-X",
+            "PUT",
+            &format!("http://localhost:{port}/json/new?{url}"),
+        ])
         .output()?;
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    json["id"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("no target id in /json/new response: {}", String::from_utf8_lossy(&output.stdout)))
+    json["id"].as_str().map(str::to_string).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no target id in /json/new response: {}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    })
 }

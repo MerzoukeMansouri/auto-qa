@@ -25,7 +25,9 @@ pub fn write(name: &str, contents: &str) -> anyhow::Result<()> {
 }
 
 pub fn read(name: &str) -> Option<String> {
-    std::fs::read_to_string(file(name)).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(file(name))
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 pub fn port() -> u16 {
@@ -59,7 +61,11 @@ pub fn session_exists() -> bool {
 /// actually executed, so a session can be replayed/audited after the fact.
 pub fn append_log(action: &str, result_url: &str) {
     use std::io::Write;
-    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file("log.jsonl")) else {
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file("log.jsonl"))
+    else {
         return;
     };
     let ts = std::time::SystemTime::now()
