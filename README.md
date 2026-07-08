@@ -1,3 +1,17 @@
+<p align="center">
+  <a href="https://github.com/MerzoukeMansouri/homebrew">
+    <img src="https://cdn.simpleicons.org/rust/000000/FFFFFF" width="48" height="48" alt="Rust">
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/MerzoukeMansouri/homebrew">
+    <img src="https://cdn.simpleicons.org/react/61DAFB" width="48" height="48" alt="React">
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/MerzoukeMansouri/homebrew">
+    <img src="https://cdn.simpleicons.org/homebrew/FBB040" width="48" height="48" alt="Homebrew">
+  </a>
+</p>
+
 # cu-agent
 
 A Rust CLI (`cua`) that drives a real Chrome browser via CDP, plus a Claude Code
@@ -5,26 +19,13 @@ Skill that teaches Claude how to use it. Reasoning/orchestration is delegated
 entirely to `claude -p` (headless Claude Code) — this project has no agent
 loop of its own.
 
-Rebuilt from the Gemini-based Python reference at
-`../computer-use-preview` (`agent.py` + `computers/`), keeping the same
-action set but replacing the hand-rolled retry/dispatch loop with Claude
-Code's own agentic tool-use loop.
-
-## Setup
-
-Requires Google Chrome installed locally (macOS default path is used
-automatically; set `CHROME_PATH` to override, or on Linux for
-`google-chrome`/`chromium`/`chromium-browser`).
-
-```
-cargo build --release
-```
-
-The binary is named **`cua`**, not `cu` — `cu` is a preexisting Unix command
-(serial dial-out utility, `/usr/bin/cu` on macOS/Linux) and using that name
-would silently invoke the wrong program.
-
 ## Usage
+
+Install via Homebrew:
+
+```
+brew install MerzoukeMansouri/homebrew/cua
+```
 
 Standalone CLI, one Chrome session at a time (state lives in `~/.cu-agent/`):
 
@@ -48,7 +49,7 @@ skill. Requires `jq` (`brew install jq`) — used to turn Claude's raw NDJSON
 event stream into readable step-by-step output (thinking, each tool call,
 tool results, final answer) instead of a wall of raw JSON.
 
-## Playwright test generation
+### Playwright test generation
 
 Every action `cua` executes (whether run by hand or via `cua run`) is
 captured with a DOM selector and a per-action screenshot into
@@ -59,8 +60,6 @@ Playwright test from it:
 cua review              # opens a local dark-themed UI at localhost:4321
                          # — edit/delete actions, add assertions, click Validate
 ```
-
-`cua review` needs the UI built once: `cd web && npm install && npm run build`.
 
 Or skip the UI entirely for scripting/CI:
 
@@ -73,37 +72,6 @@ Selectors are picked `#id` > `[data-testid=...]` (also `data-test`/`data-cy`/
 verified unique against the live DOM at capture time. Assertions: an
 `await expect(page).toHaveURL(...)` is auto-inserted after every navigation;
 add your own `visible`/`text`/`value` checks per-element from the review UI.
-
-## Explicitly descoped (vs. the Python reference)
-
-Documented here rather than silently dropped:
-
-- **Legacy Gemini-model action names** (`open_web_browser`, `click_at`,
-  `scroll_document`, `wait_5_seconds`, `search`) — reference-only for older
-  Gemini model compatibility; `cua`'s action set targets one interface.
-- **`safety_decision` interactive confirmation** — a Gemini-API-specific
-  safety-service concept. Claude Code has its own permission-prompt system
-  (`--permission-mode`) covering the analogous concern.
-- **`BrowserbaseComputer` (remote managed browser)** — `cua` launches/connects
-  to a local Chrome only. `Browser::connect` already supports arbitrary CDP
-  URLs, so a `--connect-url` mode is a small future extension, not a redesign.
-- **`highlight_mouse` visual debug circle** — cosmetic, skip for v1.
-- **Screenshot-pruning in conversation history** — a Gemini-context-management
-  concern; irrelevant here since Claude Code manages its own session context.
-- **`multiply_numbers` custom function example** — reference-only demo of
-  custom tool wiring, not part of the browser feature set.
-
-## Screenshot cost
-
-Two optimizations keep vision-model cost/latency down per loop iteration:
-
-- **JPEG, quality 75** instead of lossless PNG (`browser::take_screenshot`) —
-  screenshots are mostly flat UI/text, which compresses well; smaller file,
-  faster to write/read/base64.
-- **Viewport pinned to 1024×768** at `cua open` (`browser::set_viewport`, via
-  `Emulation.setDeviceMetricsOverride`) regardless of the host display's real
-  resolution — vision-model token cost scales with image pixel dimensions,
-  not file size, so this is what actually bounds tokens per screenshot.
 
 ## Observability
 
