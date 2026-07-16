@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "cua", about = "Drive a real Chrome browser via CDP")]
+#[command(name = "cua", about = "Drive a real Chrome browser via Playwright MCP")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -9,94 +9,17 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Launch Chrome, optionally navigating to a URL.
-    Open {
-        url: Option<String>,
-    },
-    /// Kill the Chrome session and clean up state.
-    Close,
-    /// Screenshot the current page without acting.
-    Screenshot,
-    Click {
-        x: f64,
-        y: f64,
-    },
-    DoubleClick {
-        x: f64,
-        y: f64,
-    },
-    TripleClick {
-        x: f64,
-        y: f64,
-    },
-    RightClick {
-        x: f64,
-        y: f64,
-    },
-    MiddleClick {
-        x: f64,
-        y: f64,
-    },
-    MouseDown {
-        x: f64,
-        y: f64,
-    },
-    MouseUp {
-        x: f64,
-        y: f64,
-    },
-    Hover {
-        x: f64,
-        y: f64,
-    },
-    Drag {
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
-    },
-    /// Type text into the focused element.
-    Type {
-        text: String,
-        #[arg(long)]
-        enter: bool,
-    },
-    /// Press a key or `+`-joined combo, e.g. "Enter", "control+a".
-    Key {
-        combo: String,
-    },
-    KeyDown {
-        key: String,
-    },
-    KeyUp {
-        key: String,
-    },
-    Scroll {
-        x: f64,
-        y: f64,
-        direction: String,
-        #[arg(default_value_t = 800.0)]
-        magnitude: f64,
-    },
-    Navigate {
-        url: String,
-    },
-    Back,
-    Forward,
-    Wait {
-        seconds: u64,
-    },
-    /// Ensure a browser session, run `claude -p` on it, then tear down.
+    /// Run `claude -p` wired to Playwright MCP, driving a real browser.
     Run {
         #[arg(long)]
         query: String,
     },
-    /// Generate a Playwright .spec.ts from ~/.cu-agent/actions.json.
+    /// Generate a Playwright .spec.ts from the latest `cua run` session.
     Codegen {
         #[arg(long, default_value = "cua-generated.spec.ts")]
         out: String,
     },
-    /// Open the local review UI for the current session's actions.json.
+    /// Open the local review UI for the latest `cua run` session.
     Review {
         #[arg(long, default_value_t = 4321)]
         port: u16,

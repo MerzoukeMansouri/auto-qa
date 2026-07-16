@@ -1,4 +1,36 @@
-use crate::{commands, state};
+use crate::state;
+
+/// MCP server config for `claude -p`: launches Playwright's own MCP server
+/// (via `npx`), which drives and owns its own browser instance.
+/// `--save-session` + `--codegen typescript` (the default) makes Playwright
+/// MCP itself write a replayable .spec.ts of the run to `--output-dir` —
+/// that's the source for `cua codegen` post-run instead of our actions.json,
+/// which MCP-driven runs never populate.
+fn mcp_config() -> String {
+    let out_dir = state::runtime_dir().join("pw-session");
+    serde_json::json!({
+        "mcpServers": {
+            "playwright": {
+                "command": "npx",
+                "args": [
+                    "@playwright/mcp@latest",
+                    "--image-responses",
+                    "omit",
+                    "--save-session",
+                    "--output-dir",
+                    out_dir.display().to_string()
+                ]
+            }
+        }
+    })
+    .to_string()
+}
+
+/// Belt-and-suspenders: --allowedTools mcp__playwright already blocks other
+/// tools, but the model has still been observed answering from training
+/// knowledge instead of acting when a task looks answerable without a
+/// browser. Force it to actually drive the page.
+const SYSTEM_PROMPT: &str = "You must complete this task by driving a real browser through the playwright MCP tools (mcp__playwright__*). Do not answer from memory or prior knowledge — navigate, click, type, and read the actual rendered page for every fact you report. This session is being recorded to generate a replayable Playwright test afterward: perform only the actions strictly necessary to complete the task, in a clean, deliberate, linear sequence — no exploratory clicks, no backtracking, no dead-end navigation you don't use.";
 
 /// jq filter turning claude's raw stream-json NDJSON into readable lines:
 /// 🤔 thinking, → tool calls (with args), ← tool results, 💬 assistant text,
@@ -22,29 +54,25 @@ elif .type == "result" then
 else empty end
 "#;
 
-/// Ensures a browser session, runs `claude -p` on it, then tears the session down.
+/// Runs `claude -p` wired to the Playwright MCP server.
 pub async fn cmd_run(query: &str) -> anyhow::Result<()> {
-    if !state::session_exists() {
-        commands::cmd_open(None).await?;
-    }
     let mut claude = std::process::Command::new("claude")
         .arg("-p")
         .arg(query)
+        .arg("--mcp-config")
+        .arg(mcp_config())
+        .arg("--strict-mcp-config")
+        .arg("--append-system-prompt")
+        .arg(SYSTEM_PROMPT)
         .arg("--allowedTools")
-        .arg("Bash,Read")
-        // Belt-and-suspenders: --allowedTools alone didn't stop the model
-        // from reaching for WebSearch instead of actually driving the
-        // browser (observed in practice) — explicitly deny the tools that
-        // let it answer the task without touching `cua` at all.
-        .arg("--disallowedTools")
-        .arg("WebSearch,WebFetch")
+        .arg("mcp__playwright")
         .arg("--permission-mode")
         .arg("acceptEdits")
         // Emits one NDJSON event per step (thinking, each tool call incl.
-        // the exact `cua` command, tool results, final text) instead of just
-        // the final answer — this is what surfaces "what agent thinks and
-        // does". Plain --verbose with the default text format shows nothing
-        // extra; stream-json requires --verbose to be set.
+        // the exact Playwright MCP call, tool results, final text) instead of
+        // just the final answer — this is what surfaces "what agent thinks
+        // and does". Plain --verbose with the default text format shows
+        // nothing extra; stream-json requires --verbose to be set.
         .arg("--output-format")
         .arg("stream-json")
         .arg("--verbose")
@@ -58,12 +86,8 @@ pub async fn cmd_run(query: &str) -> anyhow::Result<()> {
         .stdin(std::process::Stdio::from(claude.stdout.take().unwrap()))
         .status();
 
-    let claude_status = claude.wait();
-    let close_result = commands::cmd_close().await;
-
-    let status = claude_status?;
+    let status = claude.wait()?;
     let _ = jq_status;
-    close_result?;
     if !status.success() {
         anyhow::bail!("claude exited with status {status}");
     }

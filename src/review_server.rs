@@ -1,6 +1,6 @@
 use crate::{action_entry::ActionEntry, playwright_codegen, state};
 use axum::{
-    body::Body, extract::Path, http::StatusCode, response::IntoResponse, routing::get, Json, Router,
+    body::Body, http::StatusCode, response::IntoResponse, routing::get, Json, Router,
 };
 use rust_embed::RustEmbed;
 
@@ -37,6 +37,10 @@ async fn serve_asset(path: &str) -> impl IntoResponse {
 }
 
 async fn get_actions() -> Json<Vec<ActionEntry>> {
+    // Re-sync on every load, not just at server startup — the review server
+    // is often left running across multiple `cua run` sessions, and a
+    // startup-only sync would keep serving whatever was captured first.
+    let _ = state::sync_actions_from_latest_mcp_session();
     Json(state::read_actions())
 }
 
@@ -44,14 +48,6 @@ async fn put_actions(Json(entries): Json<Vec<ActionEntry>>) -> impl IntoResponse
     match state::write_actions(&entries) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-async fn get_screenshot(Path(file): Path<String>) -> impl IntoResponse {
-    let path = state::runtime_dir().join("screenshots").join(&file);
-    match std::fs::read(&path) {
-        Ok(bytes) => ([("content-type", "image/jpeg")], bytes).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -78,7 +74,6 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/actions", get(get_actions).put(put_actions))
         .route("/api/validate", axum::routing::post(post_validate))
-        .route("/screenshots/:file", get(get_screenshot))
         .fallback(|uri: axum::http::Uri| async move { serve_asset(uri.path()).await });
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;

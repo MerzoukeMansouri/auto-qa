@@ -3,16 +3,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogTrigger, DialogContent } from "@/components/ui/dialog"
 import type { ActionEntry } from "@/types"
 import { emptyAssert } from "@/types"
 import { Trash2, Plus, CheckCircle2 } from "lucide-react"
 
 function actionSummary(e: ActionEntry): string {
+  if (e.value) return e.value
   if (e.selector) return e.selector
-  if (e.url) return e.url
-  if (e.combo) return e.combo
-  if (typeof e.x === "number") return `(${e.x}, ${e.y})`
   return "—"
 }
 
@@ -43,26 +40,6 @@ function ActionCard({
         </Button>
       </CardHeader>
       <CardContent className="flex gap-4 items-start">
-        {entry.screenshot && (
-          <Dialog>
-            <DialogTrigger asChild>
-              <button className="shrink-0 rounded-md overflow-hidden border border-border">
-                <img
-                  src={`/screenshots/${entry.screenshot.replace(/^screenshots\//, "")}`}
-                  alt=""
-                  className="h-20 w-32 object-cover"
-                />
-              </button>
-            </DialogTrigger>
-            <DialogContent>
-              <img
-                src={`/screenshots/${entry.screenshot.replace(/^screenshots\//, "")}`}
-                alt=""
-                className="max-w-full max-h-[80vh]"
-              />
-            </DialogContent>
-          </Dialog>
-        )}
         <div className="flex-1 grid grid-cols-2 gap-3">
           {isAssert ? (
             <>
@@ -96,38 +73,13 @@ function ActionCard({
               )}
             </>
           ) : (
-            <>
-              {["click", "double_click", "triple_click", "right_click", "middle_click", "hover", "drag", "type"].includes(
-                entry.kind
-              ) && (
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground col-span-2">
-                  Selector
-                  <Input
-                    value={entry.selector ?? ""}
-                    placeholder="(no selector captured)"
-                    onChange={(e) => onChange({ ...entry, selector: e.target.value })}
-                  />
-                </label>
-              )}
-              {entry.kind === "type" && (
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground col-span-2">
-                  Value
-                  <Input
-                    value={entry.value ?? ""}
-                    onChange={(e) => onChange({ ...entry, value: e.target.value })}
-                  />
-                </label>
-              )}
-              {entry.kind === "navigate" && (
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground col-span-2">
-                  URL
-                  <Input
-                    value={entry.url ?? ""}
-                    onChange={(e) => onChange({ ...entry, url: e.target.value })}
-                  />
-                </label>
-              )}
-            </>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground col-span-2">
+              Playwright statement
+              <Input
+                value={entry.value ?? ""}
+                onChange={(e) => onChange({ ...entry, value: e.target.value })}
+              />
+            </label>
           )}
         </div>
       </CardContent>

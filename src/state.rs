@@ -6,27 +6,22 @@ pub fn runtime_dir() -> PathBuf {
     PathBuf::from(home).join(".cu-agent")
 }
 
-fn file(name: &str) -> PathBuf {
-    runtime_dir().join(name)
-}
-
-pub fn ensure_runtime_dir() -> anyhow::Result<()> {
-    std::fs::create_dir_all(runtime_dir())?;
-    std::fs::create_dir_all(runtime_dir().join("screenshots"))?;
-    Ok(())
-}
-
-pub fn screenshot_path() -> PathBuf {
-    file("screenshot.jpg")
-}
-
-/// Per-action screenshot path — `n` is the action's index in actions.json.
-pub fn screenshot_path_for(n: usize) -> PathBuf {
-    runtime_dir().join("screenshots").join(format!("{n}.jpg"))
-}
-
 pub fn actions_path() -> PathBuf {
-    file("actions.json")
+    runtime_dir().join("actions.json")
+}
+
+/// `session.md` from the most recent `cua run` (dirs are named
+/// `session-<unix_ms>`, so a plain lexical max gives the latest).
+pub fn latest_mcp_session_md() -> Option<PathBuf> {
+    let dir = runtime_dir().join("pw-session");
+    let latest = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .max_by_key(|p| p.file_name().map(|n| n.to_os_string()))?;
+    let md = latest.join("session.md");
+    md.is_file().then_some(md)
 }
 
 pub fn read_actions() -> Vec<ActionEntry> {
@@ -37,72 +32,25 @@ pub fn read_actions() -> Vec<ActionEntry> {
 }
 
 pub fn write_actions(entries: &[ActionEntry]) -> anyhow::Result<()> {
-    ensure_runtime_dir()?;
+    std::fs::create_dir_all(runtime_dir())?;
     let json = serde_json::to_string_pretty(entries)?;
     std::fs::write(actions_path(), json)?;
     Ok(())
 }
 
-/// Appends one action entry to actions.json — the structured, editable
-/// record a session's `cua review` UI and `cua codegen` both read from.
-pub fn append_action(entry: &ActionEntry) -> anyhow::Result<()> {
-    let mut entries = read_actions();
-    entries.push(entry.clone());
-    write_actions(&entries)
-}
-
-pub fn write(name: &str, contents: &str) -> anyhow::Result<()> {
-    ensure_runtime_dir()?;
-    std::fs::write(file(name), contents)?;
-    Ok(())
-}
-
-pub fn read(name: &str) -> Option<String> {
-    std::fs::read_to_string(file(name))
-        .ok()
-        .map(|s| s.trim().to_string())
-}
-
-pub fn port() -> u16 {
-    read("port").and_then(|p| p.parse().ok()).unwrap_or(9222)
-}
-
-pub fn target_id() -> Option<String> {
-    read("target-id")
-}
-
-pub fn set_target_id(id: &str) -> anyhow::Result<()> {
-    write("target-id", id)
-}
-
-pub fn pid() -> Option<u32> {
-    read("chrome.pid").and_then(|p| p.parse().ok())
-}
-
-/// True if a chrome.pid file exists and that process is still alive.
-pub fn session_exists() -> bool {
-    let Some(pid) = pid() else { return false };
-    // `kill -0` checks liveness without sending a signal.
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Wipes everything, including captured actions.json/screenshots — only for
-/// `cua open` starting a genuinely new session, never for `cua close`.
-pub fn clear() {
-    let dir = runtime_dir();
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Tears down just the Chrome session bookkeeping (pid/port/target-id) so
-/// `session_exists()` goes false — leaves actions.json/screenshots intact so
-/// `cua review`/`cua codegen` still have something to read after `cua close`
-/// (including the auto-close at the end of `cua run`).
-pub fn clear_session() {
-    for name in ["chrome.pid", "port", "target-id", "user-data-dir"] {
-        let _ = std::fs::remove_file(file(name));
+/// Refreshes actions.json from the latest `cua run` (MCP) session, unless
+/// actions.json was touched more recently — e.g. by hand-editing in the
+/// review UI, which should win over re-importing the raw session.
+pub fn sync_actions_from_latest_mcp_session() -> anyhow::Result<()> {
+    let Some(session_md) = latest_mcp_session_md() else {
+        return Ok(());
+    };
+    let session_modified = std::fs::metadata(&session_md)?.modified()?;
+    if let Ok(actions_modified) = std::fs::metadata(actions_path()).and_then(|m| m.modified()) {
+        if actions_modified >= session_modified {
+            return Ok(());
+        }
     }
+    let md = std::fs::read_to_string(session_md)?;
+    write_actions(&crate::playwright_codegen::parse_mcp_session(&md))
 }

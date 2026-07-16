@@ -1,1 +1,5 @@
 /target
+/node_modules
+/.playwright-mcp
+/test-results
+/cua-generated.spec.ts
