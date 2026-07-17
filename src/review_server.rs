@@ -51,23 +51,71 @@ async fn put_actions(Json(entries): Json<Vec<ActionEntry>>) -> impl IntoResponse
     }
 }
 
+/// Bootstraps `~/.cu-agent/playwright-tests` on first use — a fresh
+/// Homebrew install has no npm project there yet, and `cua review` must
+/// work from any cwd, not just a directory someone happened to `npm init`
+/// in by hand. Cheap no-op on every call after the first (guarded by
+/// `node_modules/@playwright/test` already existing).
+async fn ensure_playwright_tests_stack() -> anyhow::Result<()> {
+    let dir = state::playwright_tests_dir();
+    if dir.join("node_modules/@playwright/test").is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&dir)?;
+
+    if !dir.join("package.json").is_file() {
+        let status = tokio::process::Command::new("npm")
+            .args(["init", "-y"])
+            .current_dir(&dir)
+            .status()
+            .await?;
+        anyhow::ensure!(status.success(), "npm init failed");
+    }
+
+    let status = tokio::process::Command::new("npm")
+        .args(["install", "-D", "@playwright/test"])
+        .current_dir(&dir)
+        .status()
+        .await?;
+    anyhow::ensure!(status.success(), "npm install @playwright/test failed");
+
+    let status = tokio::process::Command::new("npx")
+        .args(["playwright", "install", "chromium"])
+        .current_dir(&dir)
+        .status()
+        .await?;
+    anyhow::ensure!(status.success(), "playwright install chromium failed");
+
+    let config = dir.join("playwright.config.ts");
+    if !config.is_file() {
+        std::fs::write(
+            config,
+            "import { defineConfig } from '@playwright/test';\n\n\
+             export default defineConfig({\n  use: {\n    headless: false,\n  },\n});\n",
+        )?;
+    }
+    Ok(())
+}
+
 /// Regenerates `cua-generated.spec.ts` from the current actions.json —
 /// shared by both `/api/validate` (write only) and `/api/run` (write + execute).
-fn write_generated_spec() -> anyhow::Result<String> {
+fn write_generated_spec() -> anyhow::Result<(std::path::PathBuf, String)> {
     let entries = state::read_actions();
     let title = state::latest_query().unwrap_or_else(|| "generated from cua session".to_string());
     let ts = playwright_codegen::generate(&entries, &title);
-    std::fs::create_dir_all("playwright-tests")?;
-    std::fs::write("playwright-tests/cua-generated.spec.ts", &ts)?;
-    Ok(ts)
+    let dir = state::playwright_tests_dir();
+    std::fs::create_dir_all(&dir)?;
+    let out = dir.join("cua-generated.spec.ts");
+    std::fs::write(&out, &ts)?;
+    Ok((out, ts))
 }
 
 async fn post_validate() -> impl IntoResponse {
     match write_generated_spec() {
-        Ok(ts) => Json(
-            serde_json::json!({"path": "playwright-tests/cua-generated.spec.ts", "contents": ts}),
-        )
-        .into_response(),
+        Ok((out, ts)) => {
+            Json(serde_json::json!({"path": out.display().to_string(), "contents": ts}))
+                .into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -79,10 +127,13 @@ async fn post_run() -> impl IntoResponse {
     if let Err(e) = write_generated_spec() {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
+    if let Err(e) = ensure_playwright_tests_stack().await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
 
     let output = tokio::process::Command::new("npx")
         .args(["playwright", "test", "cua-generated.spec.ts"])
-        .current_dir("playwright-tests")
+        .current_dir(state::playwright_tests_dir())
         .output()
         .await;
 
@@ -110,18 +161,19 @@ async fn post_pause(Path(index): Path<usize>) -> impl IntoResponse {
     let title = state::latest_query().unwrap_or_else(|| "generated from cua session".to_string());
     let ts = playwright_codegen::generate_up_to_with_pause(&entries, index, &title);
 
-    if let Err(e) = std::fs::create_dir_all("playwright-tests") {
+    if let Err(e) = ensure_playwright_tests_stack().await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
-    let out = "playwright-tests/.cua-pause.spec.ts";
-    if let Err(e) = std::fs::write(out, &ts) {
+    let dir = state::playwright_tests_dir();
+    let out = dir.join(".cua-pause.spec.ts");
+    if let Err(e) = std::fs::write(&out, &ts) {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
     let spawned = tokio::process::Command::new("npx")
         .args(["playwright", "test", ".cua-pause.spec.ts", "--headed"])
         .env("PWDEBUG", "1")
-        .current_dir("playwright-tests")
+        .current_dir(&dir)
         .spawn();
 
     match spawned {

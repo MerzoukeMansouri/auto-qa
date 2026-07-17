@@ -10,6 +10,14 @@ pub fn actions_path() -> PathBuf {
     runtime_dir().join("actions.json")
 }
 
+/// Where the review UI's Generate/Run/Pause write and execute the test —
+/// anchored under `runtime_dir()` (not the process's cwd), so `cua review`
+/// works from any directory, not just one that happens to already have a
+/// `playwright-tests/` with `@playwright/test` installed.
+pub fn playwright_tests_dir() -> PathBuf {
+    runtime_dir().join("playwright-tests")
+}
+
 /// `session.md` from the most recent `cua run` (dirs are named
 /// `session-<unix_ms>`, so a plain lexical max gives the latest).
 pub fn latest_mcp_session_md() -> Option<PathBuf> {
