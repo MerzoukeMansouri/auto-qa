@@ -64,8 +64,10 @@ fn write_generated_spec() -> anyhow::Result<String> {
 
 async fn post_validate() -> impl IntoResponse {
     match write_generated_spec() {
-        Ok(ts) => Json(serde_json::json!({"path": "playwright-tests/cua-generated.spec.ts", "contents": ts}))
-            .into_response(),
+        Ok(ts) => Json(
+            serde_json::json!({"path": "playwright-tests/cua-generated.spec.ts", "contents": ts}),
+        )
+        .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
