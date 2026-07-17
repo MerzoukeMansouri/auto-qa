@@ -1,10 +1,8 @@
 export interface ActionEntry {
-  kind: string
-  selector?: string
-  value?: string
-  assert_kind?: string
+  action: string
+  assertion: string
 }
 
-export function emptyAssert(): ActionEntry {
-  return { kind: "assert", assert_kind: "visible", selector: "" }
+export function emptyEntry(): ActionEntry {
+  return { action: "", assertion: "" }
 }

@@ -16,7 +16,7 @@ pub enum Commands {
     },
     /// Generate a Playwright .spec.ts from the latest `cua run` session.
     Codegen {
-        #[arg(long, default_value = "cua-generated.spec.ts")]
+        #[arg(long, default_value = "playwright-tests/cua-generated.spec.ts")]
         out: String,
     },
     /// Open the local review UI for the latest `cua run` session.

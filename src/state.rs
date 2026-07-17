@@ -24,6 +24,12 @@ pub fn latest_mcp_session_md() -> Option<PathBuf> {
     md.is_file().then_some(md)
 }
 
+/// The `--query` text from the most recent `cua run`, used to title the
+/// generated test instead of a generic placeholder.
+pub fn latest_query() -> Option<String> {
+    std::fs::read_to_string(runtime_dir().join("last-query.txt")).ok()
+}
+
 pub fn read_actions() -> Vec<ActionEntry> {
     std::fs::read_to_string(actions_path())
         .ok()

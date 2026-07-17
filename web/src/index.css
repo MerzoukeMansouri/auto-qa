@@ -3,31 +3,42 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Values below are Mozaic Design System tokens (grey/primary-01/secondary-red
+   scale + radius/shadow scale), pulled via the mozaic-design-tokens skill —
+   not arbitrary picks. */
 :root {
-  --radius: 0.5rem;
+  --radius: 4px; /* Mozaic radius.m */
 }
 
 /* Dark theme only — this app never renders a light palette. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.185 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.185 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.7 0.15 290);
-  --primary-foreground: oklch(0.145 0 0);
-  --secondary: oklch(0.25 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.25 0 0);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.25 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.6 0.22 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.7 0.15 290);
+  --background: #191919; /* grey-900 */
+  --foreground: #ffffff; /* grey-000 */
+  --card: #333333; /* grey-800 */
+  --card-foreground: #ffffff; /* grey-000 */
+  --popover: #333333; /* grey-800 */
+  --popover-foreground: #ffffff; /* grey-000 */
+  --primary: #78be20; /* primary-01-400 */
+  --primary-foreground: #191919; /* grey-900, for contrast on bright green */
+  --secondary: #4d4d4d; /* grey-700 */
+  --secondary-foreground: #ffffff; /* grey-000 */
+  --muted: #333333; /* grey-800 */
+  --muted-foreground: #999999; /* grey-400 */
+  --accent: #4d4d4d; /* grey-700 */
+  --accent-foreground: #ffffff; /* grey-000 */
+  --destructive: #ea302d; /* secondary-red-500, Mozaic's resolved danger color */
+  --destructive-foreground: #ffffff; /* grey-000 */
+  --success: #78be20; /* primary-01-400, Mozaic's resolved success color */
+  --success-foreground: #191919; /* grey-900 */
+  --warning: #ea7315; /* secondary-orange-500, Mozaic's resolved warning color */
+  --warning-foreground: #191919; /* grey-900 */
+  --border: rgb(255 255 255 / 12%);
+  --input: rgb(255 255 255 / 15%);
+  --ring: #78be20; /* primary-01-400 */
+  --shadow-color: rgb(0 0 0 / 35%);
+  --shadow-s: 0px 1px 5px 0px var(--shadow-color);
+  --shadow-m: 0px 2px 10px 0px var(--shadow-color);
+  --shadow-l: 0px 4px 20px 0px var(--shadow-color);
 }
 
 @theme inline {
@@ -47,16 +58,30 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) - 2px); /* Mozaic radius.s */
+  --radius-md: var(--radius); /* Mozaic radius.m */
+  --radius-lg: calc(var(--radius) + 2px); /* Mozaic radius.l */
+  --radius-xl: calc(var(--radius) + 6px);
+  --shadow-sm: var(--shadow-s);
+  --shadow-md: var(--shadow-m);
+  --shadow-lg: var(--shadow-l);
 }
 
 body {
   @apply bg-background text-foreground;
   margin: 0;
+  /* Faint circuit-board grid, tinted with the brand green — subtle enough
+     not to compete with content, but reads unmistakably "tech". */
+  background-image:
+    linear-gradient(rgba(120, 190, 32, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 190, 32, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-attachment: fixed;
 }
