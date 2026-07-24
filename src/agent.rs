@@ -4,7 +4,7 @@ use crate::{action_entry::ActionEntry, state};
 /// (via `npx`), which drives and owns its own browser instance.
 /// `--save-session` + `--codegen typescript` (the default) makes Playwright
 /// MCP itself write a replayable .spec.ts of the run to `--output-dir` —
-/// that's the source for `cua codegen` post-run instead of our actions.json,
+/// that's the source for `autoqa codegen` post-run instead of our actions.json,
 /// which MCP-driven runs never populate.
 fn mcp_config() -> String {
     let out_dir = state::runtime_dir().join("pw-session");
@@ -26,7 +26,7 @@ fn mcp_config() -> String {
                     "--caps",
                     "testing",
                     // Without this, MCP persists the browser profile to disk
-                    // and reuses it across separate `cua run` invocations —
+                    // and reuses it across separate `autoqa run` invocations —
                     // cookies/localStorage from an earlier run leak into the
                     // next one, so a generated test can silently depend on
                     // state a fresh Playwright run will never have (observed:
@@ -84,7 +84,7 @@ else empty end
 
 /// Runs `claude -p` wired to the Playwright MCP server.
 pub async fn cmd_run(query: &str) -> anyhow::Result<()> {
-    // Persisted so `cua codegen`/`cua review` (run later, in a separate
+    // Persisted so `autoqa codegen`/`autoqa review` (run later, in a separate
     // invocation) can title the generated test after the actual task
     // instead of a generic placeholder.
     std::fs::create_dir_all(state::runtime_dir())?;

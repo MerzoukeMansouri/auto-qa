@@ -1,10 +1,10 @@
 [package]
-name = "cu-agent"
+name = "auto-qa"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "cua"
+name = "autoqa"
 path = "src/main.rs"
 
 [dependencies]

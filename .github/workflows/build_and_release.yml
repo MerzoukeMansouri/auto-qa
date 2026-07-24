@@ -16,9 +16,9 @@ jobs:
       pull-requests: write
     uses: MerzoukeMansouri/rust-github-reusable/.github/workflows/release.yml@main
     with:
-      binary_name: cua
-      repo: MerzoukeMansouri/cu-agent
-      formula_class: Cua
+      binary_name: autoqa
+      repo: MerzoukeMansouri/auto-qa
+      formula_class: Autoqa
       formula_desc: "Drive a real Chrome browser via CDP from the CLI"
     secrets:
       TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

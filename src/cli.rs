@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "cua", about = "Drive a real Chrome browser via Playwright MCP")]
+#[command(name = "autoqa", about = "Drive a real Chrome browser via Playwright MCP")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -14,12 +14,12 @@ pub enum Commands {
         #[arg(long)]
         query: String,
     },
-    /// Generate a Playwright .spec.ts from the latest `cua run` session.
+    /// Generate a Playwright .spec.ts from the latest `autoqa run` session.
     Codegen {
-        #[arg(long, default_value = "playwright-tests/cua-generated.spec.ts")]
+        #[arg(long, default_value = "playwright-tests/autoqa-generated.spec.ts")]
         out: String,
     },
-    /// Open the local review UI for the latest `cua run` session.
+    /// Open the local review UI for the latest `autoqa run` session.
     Review {
         #[arg(long, default_value_t = 4321)]
         port: u16,

@@ -1,5 +1,5 @@
 {
-  "name": "cu-agent",
+  "name": "auto-qa",
   "version": "1.0.0",
   "description": "<p align=\"center\">   <a href=\"https://github.com/MerzoukeMansouri/homebrew\">     <img src=\"https://cdn.simpleicons.org/rust/000000/FFFFFF\" width=\"48\" height=\"48\" alt=\"Rust\">   </a>   &nbsp;&nbsp;   <a href=\"https://github.com/MerzoukeMansouri/homebrew\">     <img src=\"https://cdn.simpleicons.org/react/61DAFB\" width=\"48\" height=\"48\" alt=\"React\">   </a>   &nbsp;&nbsp;   <a href=\"https://github.com/MerzoukeMansouri/homebrew\">     <img src=\"https://cdn.simpleicons.org/homebrew/FBB040\" width=\"48\" height=\"48\" alt=\"Homebrew\">   </a> </p>",
   "main": "index.js",
@@ -8,16 +8,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MerzoukeMansouri/cu-agent.git"
+    "url": "git+https://github.com/MerzoukeMansouri/auto-qa.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/MerzoukeMansouri/cu-agent/issues"
+    "url": "https://github.com/MerzoukeMansouri/auto-qa/issues"
   },
-  "homepage": "https://github.com/MerzoukeMansouri/cu-agent#readme",
+  "homepage": "https://github.com/MerzoukeMansouri/auto-qa#readme",
   "devDependencies": {
     "@playwright/test": "^1.61.1"
   }

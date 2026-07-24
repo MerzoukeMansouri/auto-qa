@@ -38,7 +38,7 @@ fn split_statements(code: &str) -> Vec<String> {
 /// ready-made `code` field (e.g. `await page.goto(...)` or, for a
 /// `browser_verify_*` call, `await expect(...)`). An `expect(...)` statement
 /// is paired onto the action immediately before it as that step's
-/// assertion, rather than becoming its own entry — matching how `cua run`
+/// assertion, rather than becoming its own entry — matching how `autoqa run`
 /// is prompted to verify right after each action.
 pub fn parse_mcp_session(session_md: &str) -> Vec<ActionEntry> {
     let mut entries: Vec<ActionEntry> = Vec::new();
@@ -106,7 +106,7 @@ fn wrap_test(title: &str, lines: &[String]) -> String {
 }
 
 /// Generates a self-contained Playwright TS test from a captured/edited
-/// action array. `title` is typically the original `cua run --query` text —
+/// action array. `title` is typically the original `autoqa run --query` text —
 /// falls back to a generic name when unavailable (e.g. actions.json edited
 /// by hand with no run behind it).
 pub fn generate(entries: &[ActionEntry], title: &str) -> String {

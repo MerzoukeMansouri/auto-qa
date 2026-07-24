@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 pub fn runtime_dir() -> PathBuf {
     let home = std::env::var("HOME").expect("HOME not set");
-    PathBuf::from(home).join(".cu-agent")
+    PathBuf::from(home).join(".autoqa")
 }
 
 pub fn actions_path() -> PathBuf {
@@ -11,14 +11,14 @@ pub fn actions_path() -> PathBuf {
 }
 
 /// Where the review UI's Generate/Run/Pause write and execute the test —
-/// anchored under `runtime_dir()` (not the process's cwd), so `cua review`
+/// anchored under `runtime_dir()` (not the process's cwd), so `autoqa review`
 /// works from any directory, not just one that happens to already have a
 /// `playwright-tests/` with `@playwright/test` installed.
 pub fn playwright_tests_dir() -> PathBuf {
     runtime_dir().join("playwright-tests")
 }
 
-/// `session.md` from the most recent `cua run` (dirs are named
+/// `session.md` from the most recent `autoqa run` (dirs are named
 /// `session-<unix_ms>`, so a plain lexical max gives the latest).
 pub fn latest_mcp_session_md() -> Option<PathBuf> {
     let dir = runtime_dir().join("pw-session");
@@ -32,7 +32,7 @@ pub fn latest_mcp_session_md() -> Option<PathBuf> {
     md.is_file().then_some(md)
 }
 
-/// The `--query` text from the most recent `cua run`, used to title the
+/// The `--query` text from the most recent `autoqa run`, used to title the
 /// generated test instead of a generic placeholder.
 pub fn latest_query() -> Option<String> {
     std::fs::read_to_string(runtime_dir().join("last-query.txt")).ok()
@@ -52,7 +52,7 @@ pub fn write_actions(entries: &[ActionEntry]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Refreshes actions.json from the latest `cua run` (MCP) session, unless
+/// Refreshes actions.json from the latest `autoqa run` (MCP) session, unless
 /// actions.json was touched more recently — e.g. by hand-editing in the
 /// review UI, which should win over re-importing the raw session.
 pub fn sync_actions_from_latest_mcp_session() -> anyhow::Result<()> {

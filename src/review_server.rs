@@ -5,7 +5,7 @@ use axum::{
 use rust_embed::RustEmbed;
 
 /// The built React review UI (`web/dist`), baked into the binary at compile
-/// time — a Homebrew-shipped `cua` binary has no `web/` directory alongside
+/// time — a Homebrew-shipped `autoqa` binary has no `web/` directory alongside
 /// it at runtime, so this must be self-contained rather than served from disk.
 #[derive(RustEmbed)]
 #[folder = "web/dist/"]
@@ -38,7 +38,7 @@ async fn serve_asset(path: &str) -> impl IntoResponse {
 
 async fn get_actions() -> Json<Vec<ActionEntry>> {
     // Re-sync on every load, not just at server startup — the review server
-    // is often left running across multiple `cua run` sessions, and a
+    // is often left running across multiple `autoqa run` sessions, and a
     // startup-only sync would keep serving whatever was captured first.
     let _ = state::sync_actions_from_latest_mcp_session();
     Json(state::read_actions())
@@ -51,8 +51,8 @@ async fn put_actions(Json(entries): Json<Vec<ActionEntry>>) -> impl IntoResponse
     }
 }
 
-/// Bootstraps `~/.cu-agent/playwright-tests` on first use — a fresh
-/// Homebrew install has no npm project there yet, and `cua review` must
+/// Bootstraps `~/.auto-qa/playwright-tests` on first use — a fresh
+/// Homebrew install has no npm project there yet, and `autoqa review` must
 /// work from any cwd, not just a directory someone happened to `npm init`
 /// in by hand. Cheap no-op on every call after the first (guarded by
 /// `node_modules/@playwright/test` already existing).
@@ -97,15 +97,15 @@ async fn ensure_playwright_tests_stack() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Regenerates `cua-generated.spec.ts` from the current actions.json —
+/// Regenerates `autoqa-generated.spec.ts` from the current actions.json —
 /// shared by both `/api/validate` (write only) and `/api/run` (write + execute).
 fn write_generated_spec() -> anyhow::Result<(std::path::PathBuf, String)> {
     let entries = state::read_actions();
-    let title = state::latest_query().unwrap_or_else(|| "generated from cua session".to_string());
+    let title = state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
     let ts = playwright_codegen::generate(&entries, &title);
     let dir = state::playwright_tests_dir();
     std::fs::create_dir_all(&dir)?;
-    let out = dir.join("cua-generated.spec.ts");
+    let out = dir.join("autoqa-generated.spec.ts");
     std::fs::write(&out, &ts)?;
     Ok((out, ts))
 }
@@ -132,7 +132,7 @@ async fn post_run() -> impl IntoResponse {
     }
 
     let output = tokio::process::Command::new("npx")
-        .args(["playwright", "test", "cua-generated.spec.ts"])
+        .args(["playwright", "test", "autoqa-generated.spec.ts"])
         .current_dir(state::playwright_tests_dir())
         .output()
         .await;
@@ -158,20 +158,20 @@ async fn post_pause(Path(index): Path<usize>) -> impl IntoResponse {
     if index >= entries.len() {
         return (StatusCode::BAD_REQUEST, "index out of range").into_response();
     }
-    let title = state::latest_query().unwrap_or_else(|| "generated from cua session".to_string());
+    let title = state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
     let ts = playwright_codegen::generate_up_to_with_pause(&entries, index, &title);
 
     if let Err(e) = ensure_playwright_tests_stack().await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
     let dir = state::playwright_tests_dir();
-    let out = dir.join(".cua-pause.spec.ts");
+    let out = dir.join(".autoqa-pause.spec.ts");
     if let Err(e) = std::fs::write(&out, &ts) {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
     let spawned = tokio::process::Command::new("npx")
-        .args(["playwright", "test", ".cua-pause.spec.ts", "--headed"])
+        .args(["playwright", "test", ".autoqa-pause.spec.ts", "--headed"])
         .env("PWDEBUG", "1")
         .current_dir(&dir)
         .spawn();
@@ -224,7 +224,7 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let url = format!("http://127.0.0.1:{port}");
-    println!("cua review UI: {url}");
+    println!("autoqa review UI: {url}");
     open_browser(&url);
 
     axum::serve(listener, app).await?;
