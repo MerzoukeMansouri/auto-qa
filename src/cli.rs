@@ -1,7 +1,10 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "autoqa", about = "Drive a real Chrome browser via Playwright MCP")]
+#[command(
+    name = "autoqa",
+    about = "Drive a real Chrome browser via Playwright MCP"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

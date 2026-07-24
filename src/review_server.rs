@@ -101,7 +101,8 @@ async fn ensure_playwright_tests_stack() -> anyhow::Result<()> {
 /// shared by both `/api/validate` (write only) and `/api/run` (write + execute).
 fn write_generated_spec() -> anyhow::Result<(std::path::PathBuf, String)> {
     let entries = state::read_actions();
-    let title = state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
+    let title =
+        state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
     let ts = playwright_codegen::generate(&entries, &title);
     let dir = state::playwright_tests_dir();
     std::fs::create_dir_all(&dir)?;
@@ -158,7 +159,8 @@ async fn post_pause(Path(index): Path<usize>) -> impl IntoResponse {
     if index >= entries.len() {
         return (StatusCode::BAD_REQUEST, "index out of range").into_response();
     }
-    let title = state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
+    let title =
+        state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
     let ts = playwright_codegen::generate_up_to_with_pause(&entries, index, &title);
 
     if let Err(e) = ensure_playwright_tests_stack().await {
