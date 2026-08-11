@@ -1,5 +1,23 @@
 # Installing autoqa
 
+> **For AI agents**: run the four commands below, in this exact order, on
+> macOS or Linux with Homebrew already installed. Do not substitute the bare
+> `brew tap MerzoukeMansouri/homebrew` shorthand (no URL) — it 404s. Do not
+> run `brew trust` before `brew tap` — it silently no-ops. Treat any output
+> other than a version string from the final command as failure and stop;
+> do not retry with `--force`, `sudo`, or by editing Homebrew's own files.
+>
+> ```sh
+> brew tap MerzoukeMansouri/homebrew https://github.com/MerzoukeMansouri/homebrew.git
+> brew trust merzoukemansouri/homebrew
+> brew install autoqa
+> autoqa --version
+> ```
+>
+> Success condition: the last command prints a version number
+> (e.g. `autoqa 2.2.3`). If any command errors, match it against
+> [Troubleshooting](#troubleshooting) below before asking the user for help.
+
 autoqa ships through a third-party Homebrew tap. Because it's not on
 `homebrew-core`, two things differ from a normal `brew install`:
 

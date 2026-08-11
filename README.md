@@ -24,30 +24,16 @@ its own either; Playwright MCP owns the browser.
 
 ## Usage
 
-Install via Homebrew. This is a third-party tap (not homebrew-core), so
-Homebrew requires an explicit trust step before it'll load its formulae:
-
-```
-brew tap MerzoukeMansouri/homebrew https://github.com/MerzoukeMansouri/homebrew.git
-brew trust merzoukemansouri/homebrew
-brew cat autoqa   # optional: review the formula source first
-brew install autoqa
-```
-
-Full steps, verification and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
+Install steps, verification, and troubleshooting:
+[docs/INSTALL.md](https://raw.githubusercontent.com/MerzoukeMansouri/auto-qa/main/docs/INSTALL.md).
 
 ### Install via an AI coding agent
 
-Paste this into your harness (Claude Code, Copilot CLI, Codex, etc.) to have
-it install autoqa for you:
+Paste this into your harness (Claude Code, Copilot CLI, Codex, etc.):
 
-> Install the `autoqa` CLI from its Homebrew tap. Run, in order:
-> `brew tap MerzoukeMansouri/homebrew https://github.com/MerzoukeMansouri/homebrew.git`,
-> then `brew trust merzoukemansouri/homebrew` (must run *after* the tap, not
-> before), then `brew install autoqa`. Do not use the bare
-> `brew tap MerzoukeMansouri/homebrew` shorthand without the explicit URL —
-> it resolves to a nonexistent `homebrew-homebrew` repo and fails. Verify
-> with `autoqa --version` afterward.
+> Fetch https://raw.githubusercontent.com/MerzoukeMansouri/auto-qa/main/docs/INSTALL.md
+> and follow the instructions in its "For AI agents" section to install the
+> `autoqa` CLI.
 
 Drive a browser end-to-end from a natural-language query:
 
