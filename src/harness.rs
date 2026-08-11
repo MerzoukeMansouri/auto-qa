@@ -146,12 +146,25 @@ impl Harness {
             .join(" ");
         match self {
             Harness::Claude => {
+                let dir = scratch_dir("claude-run");
+                std::fs::create_dir_all(&dir)?;
                 let mut cmd = std::process::Command::new("claude");
                 cmd.arg("-p")
                     .arg(query)
                     .arg("--mcp-config")
                     .arg(mcp_config_json(mcp).to_string())
                     .arg("--strict-mcp-config")
+                    // No user/project/local settings.json, no skills. (Not
+                    // --safe-mode: verified by hand it also kills MCP tools
+                    // from --mcp-config, not just config-file ones — leaves
+                    // the agent with zero browser tools. Not --bare either:
+                    // that drops OAuth/keychain auth, requiring
+                    // ANTHROPIC_API_KEY.) CLAUDE.md auto-discovery is
+                    // cwd-based, separate from --setting-sources — closed
+                    // below via current_dir instead.
+                    .arg("--setting-sources")
+                    .arg("")
+                    .arg("--disable-slash-commands")
                     .arg("--append-system-prompt")
                     .arg(system_prompt)
                     .arg("--allowedTools")
@@ -160,7 +173,13 @@ impl Harness {
                     .arg("acceptEdits")
                     .arg("--output-format")
                     .arg("stream-json")
-                    .arg("--verbose");
+                    .arg("--verbose")
+                    // --setting-sources only covers settings.json — CLAUDE.md
+                    // project-memory auto-discovery is cwd-based and
+                    // separate, so run from an empty scratch dir instead of
+                    // the caller's actual project (no filesystem tools are
+                    // allowed here anyway, only the MCP browser tools).
+                    .current_dir(&dir);
                 Ok(cmd)
             }
             Harness::Copilot => {
@@ -175,11 +194,22 @@ impl Harness {
                 let mut cmd = std::process::Command::new("copilot");
                 // --additional-mcp-config takes a JSON string OR an @-prefixed
                 // file path — a bare path is parsed as JSON text and fails.
+                // It also *augments* ~/.copilot/mcp-config.json rather than
+                // replacing it, so strip AGENTS.md-style custom instructions
+                // and the built-in github-mcp-server explicitly. COPILOT_HOME
+                // (undocumented but confirmed by testing) redirects the whole
+                // ~/.copilot root — config, skills/, installed-plugins/,
+                // mcp-config.json — so --additional-mcp-config's "augment"
+                // has nothing but our own file to augment. Auth is
+                // keychain-based, unaffected by the redirect.
                 cmd.arg("-p")
                     .arg(prompt)
                     .arg("--yolo")
                     .arg("--additional-mcp-config")
-                    .arg(format!("@{}", config_path.display()));
+                    .arg(format!("@{}", config_path.display()))
+                    .arg("--no-custom-instructions")
+                    .arg("--disable-builtin-mcps")
+                    .env("COPILOT_HOME", &dir);
                 Ok(cmd)
             }
             Harness::Opencode => {
@@ -230,7 +260,14 @@ impl Harness {
                     .arg(query)
                     .arg("--json")
                     .arg("--dangerously-bypass-approvals-and-sandbox")
-                    .env("CODEX_HOME", &dir);
+                    // CODEX_HOME isolates the global ~/.codex config, but
+                    // codex also auto-discovers a project-level AGENTS.md
+                    // from cwd — running from the caller's actual project
+                    // dir would merge in whatever instructions/skills live
+                    // there and can hijack this task (e.g. its own chrome
+                    // launch instead of the CDP session we hand it).
+                    .env("CODEX_HOME", &dir)
+                    .current_dir(&dir);
                 Ok(cmd)
             }
             Harness::Gemini => {
@@ -250,7 +287,19 @@ impl Harness {
                     .arg("stream-json")
                     .arg("--approval-mode=yolo")
                     .current_dir(&dir)
-                    .env("GEMINI_SYSTEM_MD", &system_prompt_path);
+                    .env("GEMINI_SYSTEM_MD", &system_prompt_path)
+                    // GEMINI_CLI_HOME overrides os.homedir() for all .gemini
+                    // resolution (skills, extensions, settings, MCP config)
+                    // — same isolation CODEX_HOME gives codex. Combined with
+                    // current_dir above (no project-local .gemini either),
+                    // nothing but our own settings.json can load.
+                    .env("GEMINI_CLI_HOME", &dir);
+                // Whatever other MCP servers/extensions merge in from the
+                // user's global ~/.gemini config, this locks which ones the
+                // model can actually call to just ours.
+                for m in mcp {
+                    cmd.arg("--allowed-mcp-server-names").arg(m.name);
+                }
                 Ok(cmd)
             }
         }
@@ -273,11 +322,17 @@ impl Harness {
                 Ok(cmd)
             }
             Harness::Copilot => {
+                let dir = scratch_dir("copilot-chat");
+                std::fs::create_dir_all(&dir)?;
                 // No MCP config, no --yolo: nothing is configured to
                 // approve, so there's nothing for the model to call.
                 let full_prompt = format!("{system_prompt}\n\n{prompt}");
                 let mut cmd = std::process::Command::new("copilot");
-                cmd.arg("-p").arg(full_prompt);
+                cmd.arg("-p")
+                    .arg(full_prompt)
+                    .arg("--no-custom-instructions")
+                    .arg("--disable-builtin-mcps")
+                    .env("COPILOT_HOME", &dir);
                 Ok(cmd)
             }
             Harness::Opencode => {
@@ -312,7 +367,8 @@ impl Harness {
                     .arg(prompt)
                     .arg("--json")
                     .arg("--dangerously-bypass-approvals-and-sandbox")
-                    .env("CODEX_HOME", &dir);
+                    .env("CODEX_HOME", &dir)
+                    .current_dir(&dir);
                 Ok(cmd)
             }
             Harness::Gemini => {
@@ -327,7 +383,8 @@ impl Harness {
                     .arg("-o")
                     .arg("stream-json")
                     .current_dir(&dir)
-                    .env("GEMINI_SYSTEM_MD", &system_prompt_path);
+                    .env("GEMINI_SYSTEM_MD", &system_prompt_path)
+                    .env("GEMINI_CLI_HOME", &dir);
                 Ok(cmd)
             }
         }
@@ -387,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_run_argv_unchanged() {
+    fn claude_run_argv_is_isolated_from_user_config() {
         let cmd = Harness::Claude
             .build_run_command("do the thing", &[playwright_spec()], "sys prompt")
             .unwrap();
@@ -396,6 +453,8 @@ mod tests {
         assert!(a.contains(&"--permission-mode".to_string()));
         assert!(a.contains(&"acceptEdits".to_string()));
         assert!(a.contains(&"--strict-mcp-config".to_string()));
+        assert!(a.contains(&"--setting-sources".to_string()));
+        assert!(a.contains(&"--disable-slash-commands".to_string()));
     }
 
     #[test]
@@ -406,6 +465,18 @@ mod tests {
         assert!(cmd
             .get_envs()
             .any(|(k, _)| k == std::ffi::OsStr::new("CODEX_HOME")));
+    }
+
+    #[test]
+    fn codex_run_cwd_is_scratch_dir_not_callers_project() {
+        // Codex auto-discovers a project-level AGENTS.md from cwd,
+        // independent of CODEX_HOME — running from the caller's actual
+        // project would merge in whatever instructions/skills live there.
+        let cmd = Harness::Codex
+            .build_run_command("q", &[playwright_spec()], "sys")
+            .unwrap();
+        let cwd = cmd.get_current_dir().expect("current_dir must be set");
+        assert!(cwd.ends_with("codex-run"));
     }
 
     #[test]
@@ -442,6 +513,19 @@ mod tests {
             .to_owned();
         let contents = std::fs::read_to_string(path).unwrap();
         assert_eq!(contents, "unique sys prompt text");
+        assert!(cmd
+            .get_envs()
+            .any(|(k, _)| k == std::ffi::OsStr::new("GEMINI_CLI_HOME")));
+    }
+
+    #[test]
+    fn copilot_run_sets_copilot_home_env() {
+        let cmd = Harness::Copilot
+            .build_run_command("q", &[playwright_spec()], "sys")
+            .unwrap();
+        assert!(cmd
+            .get_envs()
+            .any(|(k, _)| k == std::ffi::OsStr::new("COPILOT_HOME")));
     }
 
     #[test]
