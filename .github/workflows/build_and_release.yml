@@ -20,5 +20,6 @@ jobs:
       repo: MerzoukeMansouri/auto-qa
       formula_class: Autoqa
       formula_desc: "Drive a real Chrome browser via CDP from the CLI"
+      build_windows: true
     secrets:
       TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
