@@ -1,45 +1,192 @@
-use crate::{action_entry::ActionEntry, state};
+use crate::{
+    block::TestStep,
+    harness::{Harness, McpServerSpec},
+    state, tui,
+};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
-/// MCP server config for `claude -p`: launches Playwright's own MCP server
-/// (via `npx`), which drives and owns its own browser instance.
-/// `--save-session` + `--codegen typescript` (the default) makes Playwright
-/// MCP itself write a replayable .spec.ts of the run to `--output-dir` —
-/// that's the source for `autoqa codegen` post-run instead of our actions.json,
-/// which MCP-driven runs never populate.
-fn mcp_config() -> String {
-    let out_dir = state::runtime_dir().join("pw-session");
-    serde_json::json!({
-        "mcpServers": {
-            "playwright": {
-                "command": "npx",
-                "args": [
-                    "@playwright/mcp@latest",
-                    "--image-responses",
-                    "omit",
-                    "--save-session",
-                    "--output-dir",
-                    out_dir.display().to_string(),
-                    // "testing" caps add browser_verify_* tools — same as
-                    // other tool calls, their results carry a ready-made
-                    // `code` field (an `await expect(...)`), so
-                    // parse_mcp_session picks them up for free.
-                    "--caps",
-                    "testing",
-                    // Without this, MCP persists the browser profile to disk
-                    // and reuses it across separate `autoqa run` invocations —
-                    // cookies/localStorage from an earlier run leak into the
-                    // next one, so a generated test can silently depend on
-                    // state a fresh Playwright run will never have (observed:
-                    // a todo item counted as "already present" by
-                    // browser_verify_list_visible with no action in this
-                    // session that added it). `--isolated` keeps the profile
-                    // in memory, fresh every run.
-                    "--isolated"
-                ]
-            }
+/// autoqa launches Chrome itself (rather than letting Playwright MCP launch
+/// its own) so a second MCP server — `block_server_mcp_spec` — can attach to
+/// the *same* browser via CDP and replay a block's steps deterministically
+/// alongside whatever the agent is doing through Playwright MCP. Common
+/// per-OS install locations for Chrome/Chromium; first match wins.
+fn find_chrome_executable() -> anyhow::Result<std::path::PathBuf> {
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        &[
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    } else if cfg!(target_os = "windows") {
+        &[
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+    } else {
+        &[
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+        ]
+    };
+    candidates
+        .iter()
+        .map(std::path::PathBuf::from)
+        .find(|p| p.is_file())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no Chrome/Chromium executable found in the usual install locations — \
+                 install Google Chrome (or Chromium) to run `autoqa run`"
+            )
+        })
+}
+
+/// Spawns Chrome with a CDP debug port and returns the child (kept alive for
+/// the run's lifetime — dropping/killing it ends the browser) plus its
+/// `ws://` CDP endpoint, parsed off Chrome's own stderr announcement
+/// ("DevTools listening on ws://..."). `--remote-debugging-port=0` picks a
+/// free port so concurrent `autoqa run` invocations never collide.
+async fn launch_chrome_with_cdp() -> anyhow::Result<(tokio::process::Child, String)> {
+    let exe = find_chrome_executable()?;
+    // A fresh profile dir per run (keyed by pid, not a fixed path) — matches
+    // the isolation `playwright_mcp_spec`'s old `--isolated` flag used to
+    // guarantee: no cookies/localStorage leaking from a prior `autoqa run`.
+    let profile_dir = std::env::temp_dir().join(format!("autoqa-chrome-{}", std::process::id()));
+    let mut child = tokio::process::Command::new(exe)
+        .arg("--remote-debugging-port=0")
+        .arg(format!("--user-data-dir={}", profile_dir.display()))
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let stderr = child.stderr.take().expect("stderr was piped");
+    let mut lines = BufReader::new(stderr).lines();
+    let endpoint = loop {
+        let Some(line) = lines.next_line().await? else {
+            anyhow::bail!("Chrome exited before announcing its CDP endpoint");
+        };
+        if let Some(idx) = line.find("DevTools listening on ") {
+            break line[idx + "DevTools listening on ".len()..]
+                .trim()
+                .to_string();
         }
+    };
+
+    // Chrome keeps writing to stderr for its whole lifetime — drain it in
+    // the background so the pipe never fills up and blocks the browser.
+    tokio::spawn(async move { while lines.next_line().await.ok().flatten().is_some() {} });
+
+    Ok((child, endpoint))
+}
+
+/// autoqa's own MCP server (node/block-server) — exposes `list_blocks` and
+/// `run_block` to the agent, replaying a block's steps via `connectOverCDP`
+/// against the same browser Playwright MCP is driving (see
+/// `launch_chrome_with_cdp`). The script + its package.json are embedded in
+/// the binary (a Homebrew install has no `node/` dir alongside it) and
+/// written out to the runtime dir on first use.
+async fn block_server_mcp_spec(
+    cdp_endpoint: &str,
+    pw_session_baseline: &str,
+) -> anyhow::Result<McpServerSpec> {
+    let dir = state::runtime_dir().join("block-server");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join("package.json"),
+        include_str!("../node/block-server/package.json"),
+    )?;
+    std::fs::write(
+        dir.join("server.mjs"),
+        include_str!("../node/block-server/server.mjs"),
+    )?;
+
+    if !dir.join("node_modules").is_dir() {
+        let status = tokio::process::Command::new("npm")
+            .args(["install"])
+            .current_dir(&dir)
+            .status()
+            .await?;
+        anyhow::ensure!(
+            status.success(),
+            "npm install for autoqa-blocks server failed"
+        );
+    }
+
+    Ok(McpServerSpec {
+        name: "autoqa-blocks",
+        command: "node",
+        args: vec![
+            dir.join("server.mjs").display().to_string(),
+            "--cdp-endpoint".to_string(),
+            cdp_endpoint.to_string(),
+            "--blocks-dir".to_string(),
+            state::blocks_dir().display().to_string(),
+            "--params-file".to_string(),
+            state::params_path().display().to_string(),
+            "--run-log".to_string(),
+            state::run_block_log_path().display().to_string(),
+            "--pw-session-dir".to_string(),
+            state::runtime_dir()
+                .join("pw-session")
+                .display()
+                .to_string(),
+            "--pw-session-baseline".to_string(),
+            pw_session_baseline.to_string(),
+        ],
     })
-    .to_string()
+}
+
+/// The Playwright MCP server every harness wires up for `cmd_run`: launches
+/// Playwright's own MCP server (via `npx`), which drives and owns its own
+/// browser instance. `--save-session` + `--codegen typescript` (the default)
+/// makes Playwright MCP itself write a replayable .spec.ts of the run to
+/// `--output-dir` — that's the source for `autoqa codegen` post-run instead
+/// of our actions.json, which MCP-driven runs never populate.
+fn playwright_mcp_spec(locale: &str, cdp_endpoint: &str) -> anyhow::Result<McpServerSpec> {
+    let out_dir = state::runtime_dir().join("pw-session");
+    let mut args = vec![
+        "@playwright/mcp@latest".to_string(),
+        "--cdp-endpoint".to_string(),
+        cdp_endpoint.to_string(),
+        "--image-responses".to_string(),
+        "omit".to_string(),
+        "--save-session".to_string(),
+        "--output-dir".to_string(),
+        out_dir.display().to_string(),
+    ];
+
+    // `--locale` isn't a Playwright MCP CLI flag; it only takes locale via
+    // a JSON `--config` file's `contextOptions.locale`. Without this, MCP's
+    // browser context defaults to en-US regardless of what a later
+    // `playwright test` run is configured for (playwright-tests/playwright.config.ts),
+    // so a recorded session and the generated test can silently disagree on
+    // date formats / form input.
+    let config_path = state::runtime_dir().join("pw-mcp-config.json");
+    std::fs::create_dir_all(state::runtime_dir())?;
+    std::fs::write(
+        &config_path,
+        serde_json::json!({ "contextOptions": { "locale": locale } }).to_string(),
+    )?;
+    args.push("--config".to_string());
+    args.push(config_path.display().to_string());
+
+    // "testing" caps add browser_verify_* tools — same as other tool calls,
+    // their results carry a ready-made `code` field (an `await expect(...)`),
+    // so parse_mcp_session picks them up for free.
+    args.push("--caps".to_string());
+    args.push("testing".to_string());
+
+    // No `--isolated` here: with `--cdp-endpoint`, MCP attaches to the
+    // browser `launch_chrome_with_cdp` already launched instead of starting
+    // its own — that Chrome process owns a fresh-per-run profile dir
+    // (see `launch_chrome_with_cdp`), which is what `--isolated` used to
+    // guarantee for MCP's own launch.
+
+    Ok(McpServerSpec {
+        name: "playwright",
+        command: "npx",
+        args,
+    })
 }
 
 /// Belt-and-suspenders: --allowedTools mcp__playwright already blocks other
@@ -58,113 +205,111 @@ const SYSTEM_PROMPT: &str = "You must complete this task by driving a real brows
 \n\
 3. After EVERY action that changes or reveals page state (navigation, click, form fill, submit) — not just once at the end — call the single most relevant mcp__playwright__browser_verify_* tool for what that specific action was supposed to achieve, before moving to the next action. This applies regardless of whether the task's wording asks for verification: the task never mentioning 'verify' or 'check' is the default case, not a signal to skip this. A click on a 'Sign In' button gets verified by confirming the post-login element/text appears; typing into a field gets verified with browser_verify_value; a search gets verified by confirming a result is visible. Each of these becomes a real `expect(...)` assertion in the generated test — an action with no matching verify is a step the generated test cannot catch a regression on.\n\
 \n\
-4. Tool choice for step 3: prefer browser_verify_element_visible over browser_verify_text_visible whenever the target has an identifiable role/name — element-based assertions survive copy/wording changes that break text matches. Reach for browser_verify_text_visible only when there's no meaningful element to target (e.g. verifying a sentence of body text). Use browser_verify_value for form field contents and browser_verify_list_visible for a set of list items.";
+4. Tool choice for step 3: prefer browser_verify_element_visible over browser_verify_text_visible whenever the target has an identifiable role/name — element-based assertions survive copy/wording changes that break text matches. Reach for browser_verify_text_visible only when there's no meaningful element to target (e.g. verifying a sentence of body text). Use browser_verify_value for form field contents and browser_verify_list_visible for a set of list items.\n\
+\n\
+5. Before starting, call mcp__autoqa-blocks__list_blocks to see what reusable step blocks already exist. If the task matches one (e.g. a known 'login' block for a task that starts with logging in), call mcp__autoqa-blocks__run_block with its slug and a binding for every placeholder it lists, instead of re-driving those steps yourself through mcp__playwright__* — it replays the exact recorded steps deterministically. Only drive the browser directly for the parts no existing block covers.\n\
+\n\
+6. After any mcp__autoqa-blocks__run_block call, its own steps are invisible to you — you were not shown them. Never assume what it left the page in (already navigated, an item already added, already logged in); call mcp__playwright__browser_snapshot immediately after and act only on what it actually shows. Repeating a setup action the block already performed (a duplicate navigation, a duplicate item add) is a bug, not a safe default.";
 
-/// jq filter turning claude's raw stream-json NDJSON into readable lines:
-/// 🤔 thinking, → tool calls (with args), ← tool results, 💬 assistant text,
-/// ✅ final result. Long strings/blobs are truncated so image base64 data
-/// doesn't flood the terminal.
-const LOG_FILTER: &str = r#"
-def trunc: if (type == "string" and length > 300) then .[0:300] + "…" else . end;
-if .type == "assistant" then
-  (.message.content[]? |
-    if .type == "thinking" and (.thinking | length) > 0 then "🤔 " + (.thinking | trunc)
-    elif .type == "tool_use" then "→ " + .name + " " + (.input | tostring | trunc)
-    elif .type == "text" then "💬 " + .text
-    else empty end)
-elif .type == "user" then
-  (.message.content[]? |
-    if .type == "tool_result" then
-      "  ← " + (if (.content | type) == "array" then "[image]" else (.content | tostring | trunc) end)
-    else empty end)
-elif .type == "result" then
-  "\n✅ " + .result
-else empty end
-"#;
+/// Runs the selected harness wired to the Playwright MCP server (attached,
+/// via CDP, to a Chrome instance autoqa itself launches and owns) and to
+/// autoqa's own `run_block` MCP server, sharing that same CDP endpoint.
+pub async fn cmd_run(harness: Harness, query: &str, locale: &str) -> anyhow::Result<()> {
+    // Fresh per run — a stale log from a prior run would otherwise get
+    // merged into this run's session (see `state::read_run_block_log`).
+    state::clear_run_block_log()?;
 
-/// Runs `claude -p` wired to the Playwright MCP server.
-pub async fn cmd_run(query: &str) -> anyhow::Result<()> {
+    // Pre-run TUI: pick which saved blocks to replay, and in what order,
+    // before the agent starts — not a mid-run pause, a plan built up front.
+    let available_blocks = state::list_blocks().unwrap_or_default();
+    let params = state::read_params();
+    let plan = tui::pick_blocks(&available_blocks, &params)?;
+
     // Persisted so `autoqa codegen`/`autoqa review` (run later, in a separate
     // invocation) can title the generated test after the actual task
-    // instead of a generic placeholder.
+    // instead of a generic placeholder — the *original* query, not the
+    // block-plan prefix appended below (that's internal instruction text
+    // for the agent, not a fit test title, and generate() only escapes `'`
+    // and `\` in the title so multi-line text with unescaped quotes broke
+    // the emitted `.spec.ts`'s syntax).
     std::fs::create_dir_all(state::runtime_dir())?;
     std::fs::write(state::runtime_dir().join("last-query.txt"), query)?;
 
-    let mut claude = std::process::Command::new("claude")
-        .arg("-p")
-        .arg(query)
-        .arg("--mcp-config")
-        .arg(mcp_config())
-        .arg("--strict-mcp-config")
-        .arg("--append-system-prompt")
-        .arg(SYSTEM_PROMPT)
-        .arg("--allowedTools")
-        .arg("mcp__playwright")
-        .arg("--permission-mode")
-        .arg("acceptEdits")
-        // Emits one NDJSON event per step (thinking, each tool call incl.
-        // the exact Playwright MCP call, tool results, final text) instead of
-        // just the final answer — this is what surfaces "what agent thinks
-        // and does". Plain --verbose with the default text format shows
-        // nothing extra; stream-json requires --verbose to be set.
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--verbose")
-        .stdout(std::process::Stdio::piped())
-        .spawn()?;
+    let query = format!("{}{query}", tui::render_plan_prefix(&plan));
 
-    // Pipe claude's raw NDJSON through jq for human-readable output instead
-    // of dumping the raw event stream.
-    let jq_status = std::process::Command::new("jq")
-        .args(["-r", LOG_FILTER])
-        .stdin(std::process::Stdio::from(claude.stdout.take().unwrap()))
-        .status();
+    // Snapshotted before the harness (and therefore Playwright MCP) ever
+    // starts — see `state::max_pw_session_dir_name`.
+    let pw_session_baseline = state::max_pw_session_dir_name().unwrap_or_default();
 
-    let status = claude.wait()?;
-    let _ = jq_status;
+    let (mut chrome, cdp_endpoint) = launch_chrome_with_cdp().await?;
+    let run_result =
+        run_harness(harness, &query, locale, &cdp_endpoint, &pw_session_baseline).await;
+
+    // Chrome is autoqa's own child, not the harness's — always tear it down
+    // on the way out, run success or failure, or it leaks past this process.
+    let _ = chrome.kill().await;
+    run_result
+}
+
+async fn run_harness(
+    harness: Harness,
+    query: &str,
+    locale: &str,
+    cdp_endpoint: &str,
+    pw_session_baseline: &str,
+) -> anyhow::Result<()> {
+    let mcp_specs = vec![
+        playwright_mcp_spec(locale, cdp_endpoint)?,
+        block_server_mcp_spec(cdp_endpoint, pw_session_baseline).await?,
+    ];
+    let mut cmd = harness.build_run_command(query, &mcp_specs, SYSTEM_PROMPT)?;
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let child = cmd.spawn()?;
+
+    // Takes over the terminal for the run's duration, streaming the
+    // harness's (jq-filtered, or raw) output into a live-progress pane —
+    // replaces the old direct-to-stdout print loop.
+    let log_filter = harness.log_filter();
+    let status = tokio::task::spawn_blocking(move || tui::run_live(child, log_filter)).await??;
+
     if !status.success() {
-        anyhow::bail!("claude exited with status {status}");
+        anyhow::bail!("harness exited with status {status}");
     }
     Ok(())
 }
 
 /// Sends the current actions.json array + a natural-language instruction to
-/// `claude -p` and asks it to return the edited array as raw JSON — no MCP
-/// tools, no browser, this is a pure text transformation. Does not write
-/// actions.json itself; the caller only persists on successful parse, so a
-/// bad model response can never corrupt state.
+/// the selected harness and asks it to return the edited array as raw JSON —
+/// no MCP tools, no browser, this is a pure text transformation. Does not
+/// write actions.json itself; the caller only persists on successful parse,
+/// so a bad model response can never corrupt state.
 pub async fn edit_actions_via_chat(
-    current: &[ActionEntry],
+    harness: Harness,
+    current: &[TestStep],
     instruction: &str,
-) -> anyhow::Result<Vec<ActionEntry>> {
+) -> anyhow::Result<Vec<TestStep>> {
     let current_json = serde_json::to_string_pretty(current)?;
     let prompt = format!(
-        "Current steps (JSON array of {{action, assertion}} — each is a raw \
-         Playwright JS statement string, assertion may be empty):\n{current_json}\n\n\
+        "Current steps (JSON array of tagged step objects). Each item is either \
+         {{\"kind\": \"step\", \"action\": ..., \"assertion\": ...}} (a raw Playwright JS \
+         statement string, assertion may be empty) or {{\"kind\": \"block\", \"slug\": ..., \
+         \"bindings\": {{...}}}} (a reference to a reusable named block, with a map of \
+         placeholder name to param name):\n{current_json}\n\n\
          Instruction: {instruction}\n\n\
          Return the FULL updated array reflecting the instruction. Output ONLY the raw \
          JSON array, no markdown code fences, no prose before or after, no explanation."
     );
+    let system_prompt = "You output strictly valid JSON and nothing else. Never wrap output in \
+             markdown fences. Never include commentary.";
 
-    let output = tokio::process::Command::new("claude")
-        .arg("-p")
-        .arg(&prompt)
-        .arg("--append-system-prompt")
-        .arg(
-            "You output strictly valid JSON and nothing else. Never wrap output in \
-             markdown fences. Never include commentary.",
-        )
-        // No tool access needed for a pure text→JSON task — disallow tool use
-        // outright so there's no chance of a permission prompt hanging this
-        // headless call, and no chance the model wanders into Bash/WebSearch.
-        .arg("--allowedTools")
-        .arg("")
-        .output()
-        .await?;
+    let cmd = harness.build_chat_command(&prompt, system_prompt)?;
+    let mut cmd = tokio::process::Command::from(cmd);
+    let output = cmd.output().await?;
 
     if !output.status.success() {
         anyhow::bail!(
-            "claude exited with status {}: {}",
+            "harness exited with status {}: {}",
             output.status,
             String::from_utf8_lossy(&output.stderr)
         );
@@ -172,7 +317,7 @@ pub async fn edit_actions_via_chat(
 
     let raw = String::from_utf8_lossy(&output.stdout);
     let cleaned = strip_markdown_fence(raw.trim());
-    let updated: Vec<ActionEntry> = serde_json::from_str(cleaned)
+    let updated: Vec<TestStep> = serde_json::from_str(cleaned)
         .map_err(|e| anyhow::anyhow!("model did not return valid JSON: {e}\nraw output: {raw}"))?;
     Ok(updated)
 }
@@ -196,5 +341,39 @@ mod tests {
     fn strips_json_fence() {
         assert_eq!(strip_markdown_fence("```json\n[1,2]\n```"), "[1,2]");
         assert_eq!(strip_markdown_fence("[1,2]"), "[1,2]");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_copilot_chat_edits_json() {
+        let current = vec![TestStep::Step {
+            action: "click button".into(),
+            assertion: String::new(),
+        }];
+        let updated = edit_actions_via_chat(
+            crate::harness::Harness::Copilot,
+            &current,
+            "no-op: return unchanged",
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_opencode_chat_edits_json() {
+        let current = vec![TestStep::Step {
+            action: "click button".into(),
+            assertion: String::new(),
+        }];
+        let updated = edit_actions_via_chat(
+            crate::harness::Harness::Opencode,
+            &current,
+            "no-op: return unchanged",
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.len(), 1);
     }
 }

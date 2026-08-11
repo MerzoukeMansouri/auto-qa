@@ -1,49 +1,60 @@
 import { useEffect, useRef, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import type { ActionEntry } from "@/types"
-import { emptyEntry } from "@/types"
-import { Trash2, Plus, FileCode2, Play, Loader2, Pause, Wand2 } from "lucide-react"
-
-function CodeInput({
-  value,
-  placeholder,
-  onChange,
-  muted,
-}: {
-  value: string
-  placeholder?: string
-  onChange: (v: string) => void
-  muted?: boolean
-}) {
-  return (
-    <Input
-      className={
-        "h-auto border-transparent bg-transparent px-1 py-0.5 font-mono text-xs shadow-none focus-visible:border-input focus-visible:bg-input/20" +
-        (muted ? " text-muted-foreground" : "")
-      }
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  )
-}
+import { Sidebar, type View } from "@/components/Sidebar"
+import { StepsView } from "@/components/StepsView"
+import { BlocksPalette } from "@/components/BlocksPalette"
+import { BlocksView, slugify } from "@/components/BlocksView"
+import { ParamsView } from "@/components/ParamsView"
+import type { TestStep, Block, Param, Test } from "@/types"
+import { emptyStep } from "@/types"
+import { reorder } from "@/lib/dnd"
 
 export default function App() {
-  const [entries, setEntries] = useState<ActionEntry[]>([])
+  const [entries, setEntries] = useState<TestStep[]>([])
+  const [snapshot, setSnapshot] = useState<TestStep[]>([])
+  const [currentSlug, setCurrentSlug] = useState<string | null>(null)
+  const [tests, setTests] = useState<[string, Test][]>([])
+  const [blocks, setBlocks] = useState<[string, Block][]>([])
+  const [params, setParams] = useState<Param[]>([])
   const [toast, setToast] = useState<{ text: string; variant: "info" | "pass" | "fail" } | null>(null)
   const [running, setRunning] = useState(false)
   const [chatInput, setChatInput] = useState("")
   const [chatBusy, setChatBusy] = useState(false)
+  const [view, setView] = useState<View>("tests")
+  const [selected, setSelected] = useState<Set<number>>(new Set())
   const saveTimer = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     fetch("/api/actions")
       .then((r) => r.json())
-      .then(setEntries)
+      .then((steps: TestStep[]) => {
+        setEntries(steps)
+        setSnapshot(steps)
+      })
+    refreshBlocks()
+    refreshTests()
+    fetch("/api/params")
+      .then((r) => r.json())
+      .then(setParams)
   }, [])
 
-  function scheduleSave(next: ActionEntry[]) {
+  function refreshBlocks(): Promise<void> {
+    return fetch("/api/blocks")
+      .then((r) => r.json())
+      .then(setBlocks)
+  }
+
+  function refreshTests(): Promise<void> {
+    return fetch("/api/tests")
+      .then((r) => r.json())
+      .then(setTests)
+  }
+
+  const dirty = JSON.stringify(entries) !== JSON.stringify(snapshot)
+  const currentTestName = currentSlug
+    ? (tests.find(([slug]) => slug === currentSlug)?.[1].name ?? currentSlug)
+    : "untitled"
+
+  function scheduleSave(next: TestStep[]) {
     setEntries(next)
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
@@ -55,7 +66,7 @@ export default function App() {
     }, 400)
   }
 
-  function updateAt(i: number, next: ActionEntry) {
+  function updateAt(i: number, next: TestStep) {
     const copy = entries.slice()
     copy[i] = next
     scheduleSave(copy)
@@ -63,30 +74,151 @@ export default function App() {
 
   function deleteAt(i: number) {
     scheduleSave(entries.filter((_, idx) => idx !== i))
+    setSelected((s) => {
+      const next = new Set(Array.from(s).filter((idx) => idx !== i).map((idx) => (idx > i ? idx - 1 : idx)))
+      return next
+    })
   }
 
   function addEntry() {
-    scheduleSave([...entries, emptyEntry()])
+    scheduleSave([...entries, emptyStep()])
   }
 
-  function insertAfter(i: number) {
+  function moveStep(from: number, to: number) {
+    scheduleSave(reorder(entries, from, to))
+  }
+
+  function insertBlockAt(gap: number, slug: string) {
     const copy = entries.slice()
-    copy.splice(i + 1, 0, emptyEntry())
+    copy.splice(gap, 0, { kind: "block", slug, bindings: {} })
     scheduleSave(copy)
   }
 
-  async function saveNow() {
+  function toggleSelect(i: number) {
+    setSelected((s) => {
+      const next = new Set(s)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }
+
+  async function saveSelectionAsBlock() {
+    const indices = Array.from(selected).sort((a, b) => a - b)
+    if (indices.length === 0) return
+    const name = window.prompt("Block name?")
+    if (!name || !name.trim()) return
+    const slug = slugify(name)
+    const steps = indices
+      .map((i) => entries[i])
+      .filter((e): e is Extract<TestStep, { kind: "step" }> => e.kind === "step")
+      .map(({ action, assertion }) => ({ action, assertion }))
+    const block: Block = { name: name.trim(), steps }
+    await fetch(`/api/blocks/${slug}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(block),
+    })
+    const insertPos = indices[0]
+    const next = entries.filter((_, i) => !selected.has(i))
+    next.splice(insertPos, 0, { kind: "block", slug, bindings: {} })
+    scheduleSave(next)
+    setSelected(new Set())
+    await refreshBlocks()
+    showToast(`saved block "${name.trim()}"`, "pass")
+  }
+
+  async function saveNow(next?: TestStep[]) {
     window.clearTimeout(saveTimer.current)
+    const body = next ?? entries
     await fetch("/api/actions", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(entries),
+      body: JSON.stringify(body),
     })
   }
 
   function showToast(text: string, variant: "info" | "pass" | "fail") {
     setToast({ text, variant })
     setTimeout(() => setToast(null), 5000)
+  }
+
+  async function openTest(slug: string) {
+    const res = await fetch(`/api/tests/${slug}/open`, { method: "POST" })
+    const steps: TestStep[] = await res.json()
+    setEntries(steps)
+    setSnapshot(steps)
+    setCurrentSlug(slug)
+    setSelected(new Set())
+    setView("tests")
+  }
+
+  async function openLastRun() {
+    const res = await fetch("/api/last-run/open", { method: "POST" })
+    if (!res.ok) {
+      showToast(await res.text(), "fail")
+      return
+    }
+    const steps: TestStep[] = await res.json()
+    setEntries(steps)
+    // Loaded as an untitled buffer, not tied to any saved test — matches
+    // "New test" semantics (snapshot equals the loaded content, so it
+    // isn't flagged dirty until actually edited further; "Save as" is how
+    // you'd turn it into a named test).
+    setSnapshot(steps)
+    setCurrentSlug(null)
+    setSelected(new Set())
+    setView("tests")
+    showToast("loaded last run", "info")
+  }
+
+  async function newTest() {
+    await saveNow([])
+    setEntries([])
+    setSnapshot([])
+    setCurrentSlug(null)
+    setSelected(new Set())
+    setView("tests")
+  }
+
+  async function saveTest() {
+    if (currentSlug) {
+      await persistTest(currentSlug, tests.find(([s]) => s === currentSlug)?.[1].name ?? currentSlug)
+    } else {
+      await saveTestAs()
+    }
+  }
+
+  async function saveTestAs() {
+    const name = window.prompt("Test name?", currentSlug ? currentTestName : "")
+    if (!name || !name.trim()) return
+    await persistTest(slugify(name), name.trim())
+  }
+
+  async function persistTest(slug: string, name: string) {
+    await saveNow()
+    const test: Test = { name, steps: entries }
+    await fetch(`/api/tests/${slug}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(test),
+    })
+    setCurrentSlug(slug)
+    setSnapshot(entries)
+    await refreshTests()
+    showToast(`saved test "${name}"`, "pass")
+  }
+
+  async function deleteTest(slug: string) {
+    const name = tests.find(([s]) => s === slug)?.[1].name ?? slug
+    if (!window.confirm(`Delete test "${name}"?`)) return
+    await fetch(`/api/tests/${slug}`, { method: "DELETE" })
+    if (slug === currentSlug) {
+      setCurrentSlug(null)
+      setSnapshot(entries)
+    }
+    await refreshTests()
+    showToast(`deleted test "${name}"`, "info")
   }
 
   async function validate() {
@@ -145,122 +277,67 @@ export default function App() {
     }
   }
 
-  const verifiedCount = entries.filter((e) => e.assertion).length
-
   return (
-    <div className="min-h-screen max-w-4xl mx-auto p-6 flex flex-col gap-4">
-      <div className="flex items-center justify-between sticky top-0 bg-background/95 backdrop-blur-sm py-3 z-10 border-b border-border">
-        <div className="flex items-center gap-5">
-          <h1 className="font-mono text-[15px] font-semibold">cua_review</h1>
-          {entries.length > 0 && (
-            <div className="flex gap-4 font-mono text-[11px] text-muted-foreground">
-              <span>
-                steps <b className="text-foreground tabular-nums">{entries.length}</b>
-              </span>
-              <span>
-                verified <b className="text-foreground tabular-nums">{verifiedCount}</b>
-              </span>
-              <span>
-                unverified <b className="text-foreground tabular-nums">{entries.length - verifiedCount}</b>
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={addEntry}>
-            <Plus /> Add step
-          </Button>
-          <Button variant="outline" onClick={validate}>
-            <FileCode2 /> Generate
-          </Button>
-          <Button onClick={runTest} disabled={running}>
-            {running ? <Loader2 className="animate-spin" /> : <Play />}
-            {running ? "Running…" : "Run"}
-          </Button>
-        </div>
-      </div>
+    <div className="min-h-screen flex">
+      <Sidebar
+        view={view}
+        setView={setView}
+        tests={tests}
+        currentSlug={currentSlug}
+        dirty={dirty}
+        hasBuffer={entries.length > 0}
+        onOpenTest={openTest}
+        onNewTest={newTest}
+        onDeleteTest={deleteTest}
+        onOpenLastRun={openLastRun}
+        blocksCount={blocks.length}
+        paramsCount={params.length}
+      />
 
-      <div className="flex gap-2">
-        <Input
-          className="font-mono text-xs"
-          placeholder="e.g. add an assertion that the price is visible"
-          value={chatInput}
-          onChange={(e) => setChatInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submitChat()}
-          disabled={chatBusy}
-        />
-        <Button variant="outline" onClick={submitChat} disabled={chatBusy || !chatInput.trim()}>
-          {chatBusy ? <Loader2 className="animate-spin" /> : <Wand2 />}
-          {chatBusy ? "Editing…" : "Edit"}
-        </Button>
-      </div>
+      <main className="flex-1 min-w-0 p-6 flex gap-6">
+        {view === "tests" && (
+          <>
+            <StepsView
+              entries={entries}
+              blocks={blocks}
+              params={params}
+              testName={currentTestName}
+              dirty={dirty}
+              selected={selected}
+              running={running}
+              chatInput={chatInput}
+              setChatInput={setChatInput}
+              chatBusy={chatBusy}
+              updateAt={updateAt}
+              deleteAt={deleteAt}
+              addEntry={addEntry}
+              moveStep={moveStep}
+              insertBlockAt={insertBlockAt}
+              toggleSelect={toggleSelect}
+              saveSelectionAsBlock={saveSelectionAsBlock}
+              pauseAt={pauseAt}
+              submitChat={submitChat}
+              validate={validate}
+              runTest={runTest}
+              saveTest={saveTest}
+              saveTestAs={saveTestAs}
+            />
+            <BlocksPalette blocks={blocks} />
+          </>
+        )}
 
-      {entries.length === 0 && (
-        <p className="font-mono text-sm text-muted-foreground italic">
-          // no actions captured yet
-        </p>
-      )}
+        {view === "blocks" && (
+          <div className="flex-1 min-w-0">
+            <BlocksView blocks={blocks} refreshBlocks={refreshBlocks} showToast={showToast} />
+          </div>
+        )}
 
-      {entries.length > 0 && (
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="w-full border-collapse font-mono text-xs">
-            <thead>
-              <tr>
-                <th className="w-8" />
-                <th className="bg-muted/40 border-b border-border px-3.5 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  step
-                </th>
-                <th className="w-9" />
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry, i) => (
-                <tr key={i} className={i % 2 === 1 ? "bg-muted/20" : undefined}>
-                  <td className="border-b border-border/60 px-3 py-2 text-muted-foreground tabular-nums align-top">
-                    {String(i + 1).padStart(2, "0")}
-                  </td>
-                  <td className="border-b border-border/60 px-1.5 py-1 align-top">
-                    <div className="flex flex-col gap-0.5">
-                      <CodeInput value={entry.action} onChange={(v) => updateAt(i, { ...entry, action: v })} />
-                      <CodeInput
-                        value={entry.assertion}
-                        placeholder="await expect(...)"
-                        onChange={(v) => updateAt(i, { ...entry, assertion: v })}
-                        muted
-                      />
-                    </div>
-                  </td>
-                  <td className="border-b border-border/60 px-2 py-1 align-top">
-                    <div className="flex gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => insertAfter(i)}
-                        aria-label="Insert step below"
-                        title="Insert step below"
-                      >
-                        <Plus className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => pauseAt(i)}
-                        aria-label="Pause here and inspect the live DOM"
-                        title="Pause here and inspect the live DOM"
-                      >
-                        <Pause className="size-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => deleteAt(i)} aria-label="Delete action">
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {view === "params" && (
+          <div className="flex-1 min-w-0">
+            <ParamsView params={params} setParams={setParams} />
+          </div>
+        )}
+      </main>
 
       {toast && (
         <div

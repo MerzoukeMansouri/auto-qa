@@ -1,6 +1,12 @@
-use crate::{action_entry::ActionEntry, agent, playwright_codegen, state};
+use crate::{
+    agent,
+    block::{Block, Param, Test, TestStep},
+    harness::Harness,
+    playwright_codegen, state,
+};
 use axum::{
-    body::Body, extract::Path, http::StatusCode, response::IntoResponse, routing::get, Json, Router,
+    body::Body, extract::Path, extract::State, http::StatusCode, response::IntoResponse,
+    routing::get, Json, Router,
 };
 use rust_embed::RustEmbed;
 
@@ -36,7 +42,7 @@ async fn serve_asset(path: &str) -> impl IntoResponse {
     }
 }
 
-async fn get_actions() -> Json<Vec<ActionEntry>> {
+async fn get_actions() -> Json<Vec<TestStep>> {
     // Re-sync on every load, not just at server startup — the review server
     // is often left running across multiple `autoqa run` sessions, and a
     // startup-only sync would keep serving whatever was captured first.
@@ -44,8 +50,80 @@ async fn get_actions() -> Json<Vec<ActionEntry>> {
     Json(state::read_actions())
 }
 
-async fn put_actions(Json(entries): Json<Vec<ActionEntry>>) -> impl IntoResponse {
+async fn put_actions(Json(entries): Json<Vec<TestStep>>) -> impl IntoResponse {
     match state::write_actions(&entries) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn get_blocks() -> Json<Vec<(String, Block)>> {
+    Json(state::list_blocks().unwrap_or_default())
+}
+
+async fn put_block(Path(slug): Path<String>, Json(block): Json<Block>) -> impl IntoResponse {
+    match state::write_block(&slug, &block) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn delete_block(Path(slug): Path<String>) -> impl IntoResponse {
+    match state::delete_block(&slug) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn get_tests() -> Json<Vec<(String, Test)>> {
+    Json(state::list_tests().unwrap_or_default())
+}
+
+/// Loads a saved test into the current working buffer (`actions.json`) —
+/// same one `/api/validate`/`/api/run`/`/api/pause` already operate on —
+/// and returns its steps, so the client's editor state and the server's
+/// buffer end up in sync in one round trip.
+async fn open_test(Path(slug): Path<String>) -> impl IntoResponse {
+    let test = match state::read_test(&slug) {
+        Ok(t) => t,
+        Err(e) => return (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    };
+    match state::write_actions(&test.steps) {
+        Ok(()) => Json(test.steps).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// Loads the latest `autoqa run` session into the working buffer on
+/// demand — unlike `get_actions`'s auto-sync, this ignores the staleness
+/// guard, so it works even if the buffer was hand-edited more recently.
+async fn open_last_run() -> impl IntoResponse {
+    match state::load_latest_mcp_session() {
+        Ok(steps) => Json(steps).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e.to_string()).into_response(),
+    }
+}
+
+async fn put_test(Path(slug): Path<String>, Json(test): Json<Test>) -> impl IntoResponse {
+    match state::write_test(&slug, &test) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn delete_test(Path(slug): Path<String>) -> impl IntoResponse {
+    match state::delete_test(&slug) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn get_params() -> Json<Vec<Param>> {
+    Json(state::read_params())
+}
+
+async fn put_params(Json(entries): Json<Vec<Param>>) -> impl IntoResponse {
+    match state::write_params(&entries) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -103,7 +181,7 @@ fn write_generated_spec() -> anyhow::Result<(std::path::PathBuf, String)> {
     let entries = state::read_actions();
     let title =
         state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
-    let ts = playwright_codegen::generate(&entries, &title);
+    let ts = playwright_codegen::generate(&entries, &title)?;
     let dir = state::playwright_tests_dir();
     std::fs::create_dir_all(&dir)?;
     let out = dir.join("autoqa-generated.spec.ts");
@@ -161,7 +239,10 @@ async fn post_pause(Path(index): Path<usize>) -> impl IntoResponse {
     }
     let title =
         state::latest_query().unwrap_or_else(|| "generated from autoqa session".to_string());
-    let ts = playwright_codegen::generate_up_to_with_pause(&entries, index, &title);
+    let ts = match playwright_codegen::generate_up_to_with_pause(&entries, index, &title) {
+        Ok(ts) => ts,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
 
     if let Err(e) = ensure_playwright_tests_stack().await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -189,13 +270,16 @@ struct ChatRequest {
     instruction: String,
 }
 
-/// Edits the step list via a natural-language instruction sent to `claude -p`
-/// — no browser/MCP involved, purely a JSON-in/JSON-out text task. Only
-/// persists on a successful parse, so a malformed model response can never
-/// corrupt actions.json.
-async fn post_chat(Json(req): Json<ChatRequest>) -> impl IntoResponse {
+/// Edits the step list via a natural-language instruction sent to the
+/// selected harness — no browser/MCP involved, purely a JSON-in/JSON-out
+/// text task. Only persists on a successful parse, so a malformed model
+/// response can never corrupt actions.json.
+async fn post_chat(
+    State(harness): State<Harness>,
+    Json(req): Json<ChatRequest>,
+) -> impl IntoResponse {
     let current = state::read_actions();
-    match agent::edit_actions_via_chat(&current, &req.instruction).await {
+    match agent::edit_actions_via_chat(harness, &current, &req.instruction).await {
         Ok(updated) => {
             if let Err(e) = state::write_actions(&updated) {
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -215,14 +299,28 @@ fn open_browser(url: &str) {
     let _ = std::process::Command::new(cmd).arg(url).spawn();
 }
 
-pub async fn serve(port: u16) -> anyhow::Result<()> {
+pub async fn serve(port: u16, harness: Harness) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/actions", get(get_actions).put(put_actions))
         .route("/api/validate", axum::routing::post(post_validate))
         .route("/api/run", axum::routing::post(post_run))
         .route("/api/pause/:index", axum::routing::post(post_pause))
         .route("/api/chat", axum::routing::post(post_chat))
-        .fallback(|uri: axum::http::Uri| async move { serve_asset(uri.path()).await });
+        .route("/api/blocks", get(get_blocks))
+        .route(
+            "/api/blocks/:slug",
+            axum::routing::put(put_block).delete(delete_block),
+        )
+        .route("/api/params", get(get_params).put(put_params))
+        .route("/api/tests", get(get_tests))
+        .route(
+            "/api/tests/:slug",
+            axum::routing::put(put_test).delete(delete_test),
+        )
+        .route("/api/tests/:slug/open", axum::routing::post(open_test))
+        .route("/api/last-run/open", axum::routing::post(open_last_run))
+        .fallback(|uri: axum::http::Uri| async move { serve_asset(uri.path()).await })
+        .with_state(harness);
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let url = format!("http://127.0.0.1:{port}");
