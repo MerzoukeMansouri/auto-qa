@@ -24,10 +24,13 @@ its own either; Playwright MCP owns the browser.
 
 ## Usage
 
-Install via Homebrew:
+Install via Homebrew. This is a third-party tap (not homebrew-core), so
+Homebrew requires an explicit trust step before it'll load its formulae:
 
 ```
+brew trust --tap MerzoukeMansouri/homebrew
 brew tap MerzoukeMansouri/homebrew
+brew cat autoqa   # optional: review the formula source first
 brew install autoqa
 ```
 
