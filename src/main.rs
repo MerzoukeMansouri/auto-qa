@@ -22,7 +22,7 @@ fn resolve_harness(flag: Option<Harness>) -> anyhow::Result<Harness> {
     if let Some(h) = state::read_harness_config() {
         return Ok(h);
     }
-    let h = tui::pick_harness()?;
+    let h = tui::pick_harness(None)?;
     state::write_harness_config(h)?;
     Ok(h)
 }
@@ -39,6 +39,15 @@ async fn main() -> anyhow::Result<()> {
         Commands::Codegen { out } => commands::cmd_codegen(&out).await,
         Commands::Review { port, harness } => {
             review_server::serve(port, resolve_harness(harness)?).await
+        }
+        Commands::Config { harness } => {
+            let h = match harness {
+                Some(h) => h,
+                None => tui::pick_harness(state::read_harness_config())?,
+            };
+            state::write_harness_config(h)?;
+            println!("harness set to {h}");
+            Ok(())
         }
     }
 }

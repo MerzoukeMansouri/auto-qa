@@ -42,4 +42,10 @@ pub enum Commands {
         #[arg(long, value_enum)]
         harness: Option<Harness>,
     },
+    /// View or change the default harness saved in ~/.autoqa/config.json.
+    Config {
+        /// Set directly, no picker. Omit to open the ratatui picker instead.
+        #[arg(long, value_enum)]
+        harness: Option<Harness>,
+    },
 }

@@ -13,25 +13,84 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::time::Duration;
 
-/// First-run-only prompt: plain stdin/stdout, not the alternate-screen
-/// picker below — a one-shot numbered choice doesn't earn a ratatui screen.
-pub fn pick_harness() -> anyhow::Result<crate::harness::Harness> {
-    println!("No harness configured yet. Pick one (saved to ~/.autoqa/config.json):");
-    for (i, h) in crate::harness::ALL.iter().enumerate() {
-        println!("  {}) {h}", i + 1);
-    }
-    loop {
-        print!("> ");
-        std::io::stdout().flush()?;
-        let mut line = String::new();
-        std::io::stdin().read_line(&mut line)?;
-        match line.trim().parse::<usize>() {
-            Ok(n) if n >= 1 && n <= crate::harness::ALL.len() => {
-                return Ok(crate::harness::ALL[n - 1]);
-            }
-            _ => println!("Enter a number 1-{}.", crate::harness::ALL.len()),
+/// Harness picker screen, used both for the first-run prompt (`resolve_harness`)
+/// and `autoqa config` with no `--harness`. `Esc`/`q` aborts (returns Err) —
+/// same convention as `pick_blocks`.
+pub fn pick_harness(
+    current: Option<crate::harness::Harness>,
+) -> anyhow::Result<crate::harness::Harness> {
+    let mut term = enter_tui()?;
+    let mut cursor = current
+        .and_then(|c| crate::harness::ALL.iter().position(|h| *h == c))
+        .unwrap_or(0);
+
+    let result = loop {
+        term.draw(|f| {
+            let area = f.area();
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(3), Constraint::Length(3)])
+                .split(area);
+
+            let items: Vec<ListItem> = crate::harness::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    let style = if i == cursor {
+                        Style::default().add_modifier(Modifier::REVERSED)
+                    } else {
+                        Style::default()
+                    };
+                    let marker = if current == Some(*h) {
+                        " (current)"
+                    } else {
+                        ""
+                    };
+                    ListItem::new(format!("{h}{marker}")).style(style)
+                })
+                .collect();
+            f.render_widget(
+                List::new(items).block(
+                    UiBlock::default()
+                        .borders(Borders::ALL)
+                        .title("Pick a harness"),
+                ),
+                rows[0],
+            );
+
+            let help = "↑/↓: move  Enter: select  q/Esc: cancel";
+            f.render_widget(
+                Paragraph::new(help)
+                    .wrap(Wrap { trim: true })
+                    .block(UiBlock::default().borders(Borders::ALL)),
+                rows[1],
+            );
+        })?;
+
+        if !event::poll(Duration::from_millis(200))? {
+            continue;
         }
-    }
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        match key.code {
+            KeyCode::Up => {
+                cursor = (cursor + crate::harness::ALL.len() - 1) % crate::harness::ALL.len()
+            }
+            KeyCode::Down => cursor = (cursor + 1) % crate::harness::ALL.len(),
+            KeyCode::Enter => break Ok(crate::harness::ALL[cursor]),
+            KeyCode::Esc | KeyCode::Char('q') => {
+                break Err(anyhow::anyhow!("harness selection cancelled"))
+            }
+            _ => {}
+        }
+    };
+
+    leave_tui()?;
+    result
 }
 
 /// A block chosen in the pre-run picker, in run order, with every
