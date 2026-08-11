@@ -109,6 +109,16 @@ fn scratch_dir(name: &str) -> PathBuf {
     state::runtime_dir().join("harness-config").join(name)
 }
 
+/// Codex reads auth from `$CODEX_HOME/auth.json`. Since we point CODEX_HOME
+/// at a scratch dir, copy the real login (ChatGPT or API key) in — otherwise
+/// codex sees no auth and fails even when the user is logged in.
+fn copy_codex_auth(dir: &std::path::Path) {
+    if let Ok(home) = std::env::var("HOME") {
+        let auth = PathBuf::from(home).join(".codex").join("auth.json");
+        let _ = std::fs::copy(auth, dir.join("auth.json"));
+    }
+}
+
 fn mcp_config_json(servers: &[McpServerSpec]) -> serde_json::Value {
     let mut mcp_servers = serde_json::Map::new();
     for mcp in servers {
@@ -213,6 +223,7 @@ impl Harness {
                 std::fs::write(dir.join("system-prompt.md"), system_prompt)?;
                 let config = codex_config_toml(mcp);
                 std::fs::write(dir.join("config.toml"), config)?;
+                copy_codex_auth(&dir);
 
                 let mut cmd = std::process::Command::new("codex");
                 cmd.arg("exec")
@@ -294,6 +305,7 @@ impl Harness {
                 // No [mcp_servers] table at all: nothing configured to call.
                 let config = codex_config_toml(&[]);
                 std::fs::write(dir.join("config.toml"), config)?;
+                copy_codex_auth(&dir);
 
                 let mut cmd = std::process::Command::new("codex");
                 cmd.arg("exec")
