@@ -23,6 +23,7 @@ pub enum Harness {
     Opencode,
     Codex,
     Gemini,
+    GeminiSdk,
 }
 
 pub const ALL: &[Harness] = &[
@@ -31,6 +32,7 @@ pub const ALL: &[Harness] = &[
     Harness::Opencode,
     Harness::Codex,
     Harness::Gemini,
+    Harness::GeminiSdk,
 ];
 
 impl std::fmt::Display for Harness {
@@ -41,6 +43,7 @@ impl std::fmt::Display for Harness {
             Harness::Opencode => "opencode",
             Harness::Codex => "codex",
             Harness::Gemini => "gemini",
+            Harness::GeminiSdk => "gemini-sdk",
         };
         f.write_str(name)
     }
@@ -117,6 +120,32 @@ fn copy_codex_auth(dir: &std::path::Path) {
         let auth = PathBuf::from(home).join(".codex").join("auth.json");
         let _ = std::fs::copy(auth, dir.join("auth.json"));
     }
+}
+
+/// `node/gemini-sdk` (own harness against the Gemini API directly, no
+/// `gemini` CLI subprocess) is embedded via `include_str!` — same reasoning
+/// as `block_server_mcp_spec` in agent.rs: a Homebrew install has no `node/`
+/// dir alongside the binary, so the script has to be written out at runtime.
+/// `npm install` only runs once (skipped whenever `node_modules` already
+/// exists), so this stays cheap on every call after the first.
+fn ensure_gemini_sdk_script() -> anyhow::Result<PathBuf> {
+    let dir = state::runtime_dir().join("gemini-sdk");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join("package.json"),
+        include_str!("../node/gemini-sdk/package.json"),
+    )?;
+    let script_path = dir.join("index.mjs");
+    std::fs::write(&script_path, include_str!("../node/gemini-sdk/index.mjs"))?;
+
+    if !dir.join("node_modules").is_dir() {
+        let status = std::process::Command::new("npm")
+            .args(["install"])
+            .current_dir(&dir)
+            .status()?;
+        anyhow::ensure!(status.success(), "npm install for gemini-sdk harness failed");
+    }
+    Ok(script_path)
 }
 
 fn mcp_config_json(servers: &[McpServerSpec]) -> serde_json::Value {
@@ -288,6 +317,7 @@ impl Harness {
                     .arg("-o")
                     .arg("stream-json")
                     .arg("--approval-mode=yolo")
+                    .arg("--skip-trust")
                     .current_dir(&dir)
                     .env("GEMINI_SYSTEM_MD", &system_prompt_path)
                     // GEMINI_CLI_HOME overrides os.homedir() for all .gemini
@@ -302,6 +332,24 @@ impl Harness {
                 for m in mcp {
                     cmd.arg("--allowed-mcp-server-names").arg(m.name);
                 }
+                Ok(cmd)
+            }
+            Harness::GeminiSdk => {
+                let dir = scratch_dir("gemini-sdk-run");
+                std::fs::create_dir_all(&dir)?;
+                let system_prompt_path = dir.join("system.md");
+                std::fs::write(&system_prompt_path, system_prompt)?;
+                let mcp_config_path = dir.join("mcp-config.json");
+                std::fs::write(&mcp_config_path, mcp_config_json(mcp).to_string())?;
+
+                let script_path = ensure_gemini_sdk_script()?;
+                let mut cmd = std::process::Command::new("node");
+                cmd.arg(&script_path)
+                    .arg(query)
+                    .arg("--system-prompt-file")
+                    .arg(&system_prompt_path)
+                    .arg("--mcp-config-file")
+                    .arg(&mcp_config_path);
                 Ok(cmd)
             }
         }
@@ -386,9 +434,28 @@ impl Harness {
                     .arg(prompt)
                     .arg("-o")
                     .arg("stream-json")
+                    .arg("--skip-trust")
                     .current_dir(&dir)
                     .env("GEMINI_SYSTEM_MD", &system_prompt_path)
                     .env("GEMINI_CLI_HOME", &dir);
+                Ok(cmd)
+            }
+            Harness::GeminiSdk => {
+                let dir = scratch_dir("gemini-sdk-chat");
+                std::fs::create_dir_all(&dir)?;
+                let system_prompt_path = dir.join("system.md");
+                std::fs::write(&system_prompt_path, system_prompt)?;
+
+                let script_path = ensure_gemini_sdk_script()?;
+                let mut cmd = std::process::Command::new("node");
+                // --raw: no MCP config, no decorative log lines — chat mode's
+                // caller (edit_actions_via_chat) parses stdout directly as
+                // the model's raw text answer.
+                cmd.arg(&script_path)
+                    .arg(prompt)
+                    .arg("--system-prompt-file")
+                    .arg(&system_prompt_path)
+                    .arg("--raw");
                 Ok(cmd)
             }
         }
@@ -405,6 +472,9 @@ impl Harness {
             Harness::Opencode => Some(OPENCODE_LOG_FILTER),
             Harness::Codex => None,
             Harness::Gemini => Some(GEMINI_LOG_FILTER),
+            // Script prints its own final log format directly — no
+            // undocumented schema to guess at, so raw passthrough.
+            Harness::GeminiSdk => None,
         }
     }
 }
@@ -548,6 +618,8 @@ mod tests {
     fn harness_without_confirmed_schema_has_no_log_filter() {
         assert!(Harness::Copilot.log_filter().is_none());
         assert!(Harness::Codex.log_filter().is_none());
+        // Script owns its own log format directly, no schema to guess at.
+        assert!(Harness::GeminiSdk.log_filter().is_none());
     }
 
     #[test]
