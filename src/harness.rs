@@ -151,6 +151,8 @@ impl Harness {
                 let mut cmd = std::process::Command::new("claude");
                 cmd.arg("-p")
                     .arg(query)
+                    .arg("--model")
+                    .arg("haiku")
                     .arg("--mcp-config")
                     .arg(mcp_config_json(mcp).to_string())
                     .arg("--strict-mcp-config")
@@ -315,6 +317,8 @@ impl Harness {
                 let mut cmd = std::process::Command::new("claude");
                 cmd.arg("-p")
                     .arg(prompt)
+                    .arg("--model")
+                    .arg("haiku")
                     .arg("--append-system-prompt")
                     .arg(system_prompt)
                     .arg("--allowedTools")
