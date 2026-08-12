@@ -1,3 +1,4 @@
 /target
 /.playwright-mcp
 /playwright-tests
+node_modules/
