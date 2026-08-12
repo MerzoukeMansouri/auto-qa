@@ -1,0 +1,9 @@
+{
+  "name": "autoqa-claude-sdk",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@modelcontextprotocol/sdk": "^1"
+  }
+}

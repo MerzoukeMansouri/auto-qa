@@ -1,0 +1,9 @@
+{
+  "name": "autoqa-gemini-sdk",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@google/genai": "^1",
+    "@modelcontextprotocol/sdk": "^1"
+  }
+}

@@ -2,8 +2,9 @@ use crate::state;
 use std::path::PathBuf;
 
 /// Fixed set of supported CLI harnesses. A `match` per concern (not a trait
-/// object) since there are exactly 5 known variants and no runtime plugin
-/// loading requirement — the compiler flags a missing arm if a 6th is added.
+/// object) since there's a known, fixed set of variants and no runtime
+/// plugin loading requirement — the compiler flags a missing arm if a new
+/// one is added.
 #[derive(
     Debug,
     Clone,
@@ -19,6 +20,7 @@ use std::path::PathBuf;
 pub enum Harness {
     #[default]
     Claude,
+    ClaudeSdk,
     Copilot,
     Opencode,
     Codex,
@@ -28,6 +30,7 @@ pub enum Harness {
 
 pub const ALL: &[Harness] = &[
     Harness::Claude,
+    Harness::ClaudeSdk,
     Harness::Copilot,
     Harness::Opencode,
     Harness::Codex,
@@ -39,6 +42,7 @@ impl std::fmt::Display for Harness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
             Harness::Claude => "claude",
+            Harness::ClaudeSdk => "claude-sdk",
             Harness::Copilot => "copilot",
             Harness::Opencode => "opencode",
             Harness::Codex => "codex",
@@ -143,7 +147,37 @@ fn ensure_gemini_sdk_script() -> anyhow::Result<PathBuf> {
             .args(["install"])
             .current_dir(&dir)
             .status()?;
-        anyhow::ensure!(status.success(), "npm install for gemini-sdk harness failed");
+        anyhow::ensure!(
+            status.success(),
+            "npm install for gemini-sdk harness failed"
+        );
+    }
+    Ok(script_path)
+}
+
+/// `node/claude-sdk` (own harness against the Claude Messages API directly —
+/// no `claude` CLI subprocess, and no Claude Agent SDK either, since that
+/// bundles and spawns the `claude-code` binary internally) is embedded via
+/// `include_str!`, same reasoning as `ensure_gemini_sdk_script`.
+fn ensure_claude_sdk_script() -> anyhow::Result<PathBuf> {
+    let dir = state::runtime_dir().join("claude-sdk");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join("package.json"),
+        include_str!("../node/claude-sdk/package.json"),
+    )?;
+    let script_path = dir.join("index.mjs");
+    std::fs::write(&script_path, include_str!("../node/claude-sdk/index.mjs"))?;
+
+    if !dir.join("node_modules").is_dir() {
+        let status = std::process::Command::new("npm")
+            .args(["install"])
+            .current_dir(&dir)
+            .status()?;
+        anyhow::ensure!(
+            status.success(),
+            "npm install for claude-sdk harness failed"
+        );
     }
     Ok(script_path)
 }
@@ -211,6 +245,24 @@ impl Harness {
                     // the caller's actual project (no filesystem tools are
                     // allowed here anyway, only the MCP browser tools).
                     .current_dir(&dir);
+                Ok(cmd)
+            }
+            Harness::ClaudeSdk => {
+                let dir = scratch_dir("claude-sdk-run");
+                std::fs::create_dir_all(&dir)?;
+                let system_prompt_path = dir.join("system.md");
+                std::fs::write(&system_prompt_path, system_prompt)?;
+                let mcp_config_path = dir.join("mcp-config.json");
+                std::fs::write(&mcp_config_path, mcp_config_json(mcp).to_string())?;
+
+                let script_path = ensure_claude_sdk_script()?;
+                let mut cmd = std::process::Command::new("node");
+                cmd.arg(&script_path)
+                    .arg(query)
+                    .arg("--system-prompt-file")
+                    .arg(&system_prompt_path)
+                    .arg("--mcp-config-file")
+                    .arg(&mcp_config_path);
                 Ok(cmd)
             }
             Harness::Copilot => {
@@ -373,6 +425,24 @@ impl Harness {
                     .arg("");
                 Ok(cmd)
             }
+            Harness::ClaudeSdk => {
+                let dir = scratch_dir("claude-sdk-chat");
+                std::fs::create_dir_all(&dir)?;
+                let system_prompt_path = dir.join("system.md");
+                std::fs::write(&system_prompt_path, system_prompt)?;
+
+                let script_path = ensure_claude_sdk_script()?;
+                let mut cmd = std::process::Command::new("node");
+                // --raw: no MCP config, no decorative log lines — chat mode's
+                // caller (edit_actions_via_chat) parses stdout directly as
+                // the model's raw text answer.
+                cmd.arg(&script_path)
+                    .arg(prompt)
+                    .arg("--system-prompt-file")
+                    .arg(&system_prompt_path)
+                    .arg("--raw");
+                Ok(cmd)
+            }
             Harness::Copilot => {
                 let dir = scratch_dir("copilot-chat");
                 std::fs::create_dir_all(&dir)?;
@@ -468,6 +538,9 @@ impl Harness {
     pub fn log_filter(&self) -> Option<&'static str> {
         match self {
             Harness::Claude => Some(CLAUDE_LOG_FILTER),
+            // Script prints its own final log format directly — no
+            // undocumented schema to guess at, so raw passthrough.
+            Harness::ClaudeSdk => None,
             Harness::Copilot => None,
             Harness::Opencode => Some(OPENCODE_LOG_FILTER),
             Harness::Codex => None,
@@ -620,6 +693,7 @@ mod tests {
         assert!(Harness::Codex.log_filter().is_none());
         // Script owns its own log format directly, no schema to guess at.
         assert!(Harness::GeminiSdk.log_filter().is_none());
+        assert!(Harness::ClaudeSdk.log_filter().is_none());
     }
 
     #[test]
