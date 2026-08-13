@@ -53,5 +53,6 @@ autoqa review    # turn the recorded session into a Playwright test
   - [Choosing a harness](docs/USAGE.md#choosing-a-harness)
   - [Choosing a model](docs/USAGE.md#choosing-a-model)
   - [Reusable blocks](docs/USAGE.md#reusable-blocks)
+  - [Doctor](docs/USAGE.md#doctor)
 - [Review & codegen](docs/REVIEW.md) — turning a recorded session into a Playwright test
 - [Implementation notes](docs/IMPLEMENTATION.md) — selector strategy, session parsing, harness-specific quirks

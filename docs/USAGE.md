@@ -73,6 +73,24 @@ can select one or more saved blocks to replay deterministically via a
 dedicated MCP tool before the harness starts on the actual task — instead of
 re-driving the same setup steps through the browser every time.
 
+## Doctor
+
+```
+autoqa doctor              # run the environment check on its own
+autoqa doctor --harness gemini-sdk
+autoqa run --recheck ...   # force a fresh check instead of trusting the cache
+```
+
+`autoqa run`/`autoqa review` run this automatically before doing anything
+else — a checklist screen for Node, system Chrome, the selected harness's
+CLI (or, for `claude-sdk`/`gemini-sdk`, its API key), and autoqa's own npm
+deps, auto-installing what it's allowed to and blocking with copy-pasteable
+instructions on what it isn't (Node, Chrome, harness auth — all third-party).
+The result is cached (`~/.autoqa/doctor.json`), so a repeat run with nothing
+changed skips straight past it. `autoqa doctor` runs it standalone, always
+showing the screen even on a cache hit; see
+[Environment check](INSTALL.md#environment-check) for the full breakdown.
+
 ## See also
 
 - [Install](INSTALL.md)
