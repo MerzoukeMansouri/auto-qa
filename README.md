@@ -16,151 +16,38 @@
 
 A Rust CLI (`autoqa`) that drives a real Chrome browser through a headless
 coding-agent CLI of your choice — Claude Code, GitHub Copilot CLI, opencode,
-Codex, or Gemini CLI — wired to [Playwright MCP](https://github.com/microsoft/playwright-mcp),
-records the session, and turns it into a real Playwright test.
-Reasoning/orchestration is delegated entirely to whichever harness you pick —
-this project has no agent loop of its own, and no browser-automation code of
-its own either; Playwright MCP owns the browser.
+Codex, or Gemini CLI (or `claude-sdk`/`gemini-sdk`, which call the
+Anthropic/Gemini API directly, no CLI needed) — wired to
+[Playwright MCP](https://github.com/microsoft/playwright-mcp), records the
+session, and turns it into a real Playwright test. Reasoning/orchestration is
+delegated entirely to whichever harness you pick — this project has no agent
+loop of its own for the CLI harnesses, and no browser-automation code of its
+own either; Playwright MCP owns the browser.
 
-## Usage
+## Install
 
-Install steps, verification, and troubleshooting:
-[docs/INSTALL.md](https://raw.githubusercontent.com/MerzoukeMansouri/auto-qa/main/docs/INSTALL.md).
+**Manually** — see [docs/INSTALL.md](docs/INSTALL.md) for Homebrew, a manual
+binary download (macOS/Linux/Windows), and dependencies.
 
-### Install via an AI coding agent
-
-Paste this into your harness (Claude Code, Copilot CLI, Codex, etc.):
+**Via an AI coding agent** — paste this into your harness (Claude Code,
+Copilot CLI, Codex, etc.):
 
 > Fetch https://raw.githubusercontent.com/MerzoukeMansouri/auto-qa/main/docs/INSTALL.md
 > and follow the instructions in its "For AI agents" section to install the
 > `autoqa` CLI.
 
-Drive a browser end-to-end from a natural-language query:
+## Quick start
 
 ```
 autoqa run --query "go to example.com and tell me the page title"
+autoqa review    # turn the recorded session into a Playwright test
 ```
 
-`autoqa run` launches its own Chrome (CDP debug port, fresh profile dir per
-run — no leftover cookies/localStorage between runs) and wires the selected
-harness to Playwright MCP attached to it over CDP. It shows the harness's
-reasoning and every tool call live (piped through `jq` — `brew install jq` —
-for Claude/opencode/Gemini's confirmed stream schemas; raw passthrough for
-Copilot/Codex, whose stream formats aren't officially documented) instead of
-a wall of raw NDJSON. The harness is instructed to actually drive the page
-(never answer from memory) and to verify the outcome of every action — not
-just the ones you happen to ask it to check — so the recorded session has
-real assertions, not just a chain of clicks.
+## Documentation
 
-`--locale` (BCP 47, default `en-US`) pins the MCP browser context's locale —
-without it, a recorded session and a later `playwright test` run of the
-generated spec can silently disagree on date formats/form input.
-
-Before the run starts, a pre-run picker (`↑`/`↓`, `Enter` to add/bind, `g` to
-start) lets you select and order any reusable "blocks" — named, recorded step
-sequences with placeholder bindings — to replay first; see
-[Reusable blocks](#reusable-blocks) below.
-
-### Choosing a harness
-
-```
-autoqa run --harness copilot --query "..."     # this run only
-autoqa config --harness opencode               # change the saved default
-autoqa config                                   # interactive picker instead
-```
-
-Supported: `claude`, `copilot`, `opencode`, `codex`, `gemini` — each needs its
-own CLI installed and authenticated (`claude`, `copilot`, `opencode`, `codex`,
-`gemini` respectively) on `$PATH`. Also `claude-sdk` and `gemini-sdk` — own
-agent loop against the Anthropic/Gemini API directly (no CLI subprocess),
-authenticated via `ANTHROPIC_API_KEY`/`GEMINI_API_KEY` instead.
-
-Resolution order for `run`/`review`, every time: an explicit `--harness` flag
-wins; otherwise the harness saved in `~/.autoqa/config.json` is used; if
-neither is set, you're prompted once (same picker as `autoqa config`) and the
-choice is persisted for next time.
-
-### Choosing a model
-
-```
-autoqa run --model claude-opus-5 --query "..."   # this run only
-autoqa config --model gemini-3.5-flash-lite      # change the saved default for the current harness
-autoqa config                                     # interactive: harness picker, then model picker
-```
-
-Each harness remembers its own model in `~/.autoqa/config.json` — switching
-harness doesn't carry a model string over that means nothing there. `autoqa
-config` with no flags picks from an arrow-key list for harnesses with a
-small, stable model set (`claude`/`claude-sdk`: `claude-haiku-4-5` (default),
-`claude-sonnet-5`, `claude-opus-5`, `claude-fable-5`; `gemini`/`gemini-sdk`:
-`gemini-3.6-flash` (default), `gemini-3.5-flash-lite`) or a free-text prompt
-for the rest (`copilot`, `opencode`, `codex` — no bounded list to curate, the
-model string goes straight to that CLI's own `--model`/`-m` flag). Same
-resolution order as harness: `--model` flag, then the saved value, then the
-harness's own default.
-
-### Reusable blocks
-
-The review UI (below) lets you save a run's steps as a named, reusable
-"block" with `{{placeholder}}` bindings (e.g. a `login` block parameterized on
-username/password). Any later `autoqa run`'s pre-run picker can select one or
-more saved blocks to replay deterministically via a dedicated MCP tool before
-the harness starts on the actual task — instead of re-driving the same setup
-steps through the browser every time.
-
-### Turning a session into a Playwright test
-
-Playwright MCP's `--save-session` records every tool call's ready-made JS
-statement (`await page.goto(...)`, `await expect(...).toBeVisible()`, ...).
-`autoqa` parses that into an editable step list — one `{action, assertion}` pair
-per step — and can turn it into a real `.spec.ts`:
-
-```
-autoqa review                    # opens a local dark-themed UI at localhost:4321
-                                  # — edit/reorder/insert/delete steps, chat with
-                                  # a harness to add or fix a step in plain English,
-                                  # save/replay reusable blocks, pause at any step to
-                                  # inspect the live DOM, generate and run the test
-autoqa review --port 8080        # different port
-autoqa review --harness copilot  # harness used for the chat-based step editor
-```
-
-Or skip the UI entirely for scripting/CI:
-
-```
-autoqa codegen --out my-test.spec.ts   # reads the recorded session, no UI/browser needed
-```
-
-Generated tests live under `playwright-tests/` (gitignored — regenerate
-anytime with `autoqa codegen`/`autoqa review`). That directory needs its own
-`@playwright/test` install once (`npm init -y && npm i -D @playwright/test`
-inside `playwright-tests/`) to actually run the generated spec.
-
-## Notes from implementation
-
-- Playwright MCP's own locator-generation is accessibility-first
-  (`getByRole`/`getByTestId`), not our own selector logic — `autoqa` never
-  builds a CSS selector itself. Tag your app's elements with `data-testid`
-  and the generated test picks that up automatically (Playwright prefers a
-  test id over a role+name match when one exists), which also makes tests
-  independent of on-page text/locale.
-- A statement in the recorded session can itself span multiple lines (e.g.
-  `toMatchAriaSnapshot`'s backtick template literal) — parsing splits on
-  top-level `;` while tracking paren depth and template-literal state, not a
-  naive line-by-line split, so a multi-line assertion doesn't get shredded
-  into bogus separate steps.
-- `autoqa run` launches Chrome itself with a profile dir keyed to the run's
-  pid, then attaches Playwright MCP to it via `--cdp-endpoint` instead of
-  letting MCP launch its own browser — so a second MCP server (the block
-  replayer) can drive the exact same browser over CDP alongside the harness.
-  A fresh profile dir per run gives the same no-leftover-state guarantee
-  `--isolated` used to.
-- Copilot's `--additional-mcp-config` takes a JSON string or an `@`-prefixed
-  file path — a bare path is parsed as JSON text and fails. Opencode's
-  `--pure` flag is passed on every invocation so your global
-  `~/.config/opencode/opencode.json` plugins can't leak stdout noise into
-  the harness's output parsing.
-- The review UI's "pause here" button doesn't just open a debugger — it
-  regenerates a truncated test ending in `page.pause()` and runs it headed
-  with `PWDEBUG=1`, so you're inspecting the *real* DOM at that exact step
-  through Playwright Inspector, not a stale snapshot.
+| | |
+|---|---|
+| [Install](docs/INSTALL.md) | Homebrew, manual binary, dependencies, troubleshooting |
+| [Usage](docs/USAGE.md) | Running a task, choosing a harness/model, reusable blocks |
+| [Review & codegen](docs/REVIEW.md) | Turning a recorded session into a Playwright test |
+| [Implementation notes](docs/IMPLEMENTATION.md) | Selector strategy, session parsing, harness-specific quirks |
