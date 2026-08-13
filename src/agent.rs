@@ -143,6 +143,7 @@ async fn block_server_mcp_spec(
             "--pw-session-baseline".to_string(),
             pw_session_baseline.to_string(),
         ],
+        env: vec![],
     })
 }
 
@@ -196,6 +197,15 @@ fn playwright_mcp_spec(locale: &str, cdp_endpoint: &str) -> anyhow::Result<McpSe
         name: "playwright",
         command: "npx",
         args,
+        // `npx` inherits whatever registry the caller's .npmrc points at —
+        // a corporate mirror without @playwright/mcp 404s and the MCP server
+        // silently never starts, leaving the agent with no browser tools.
+        // Force the public registry, same as block_server_mcp_spec's own
+        // `npm install` above.
+        env: vec![(
+            "NPM_CONFIG_REGISTRY",
+            state::NPM_PUBLIC_REGISTRY.to_string(),
+        )],
     })
 }
 

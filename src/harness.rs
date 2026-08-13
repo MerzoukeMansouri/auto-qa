@@ -60,6 +60,10 @@ pub struct McpServerSpec {
     pub name: &'static str,
     pub command: &'static str,
     pub args: Vec<String>,
+    /// Env vars for the spawned MCP server process — e.g. forcing
+    /// NPM_CONFIG_REGISTRY so `npx` ignores a corporate .npmrc that doesn't
+    /// mirror the package.
+    pub env: Vec<(&'static str, String)>,
 }
 
 /// jq filter turning claude's raw stream-json NDJSON into readable lines:
@@ -185,10 +189,16 @@ fn ensure_claude_sdk_script() -> anyhow::Result<PathBuf> {
 fn mcp_config_json(servers: &[McpServerSpec]) -> serde_json::Value {
     let mut mcp_servers = serde_json::Map::new();
     for mcp in servers {
-        mcp_servers.insert(
-            mcp.name.to_string(),
-            serde_json::json!({ "command": mcp.command, "args": mcp.args }),
-        );
+        let mut entry = serde_json::json!({ "command": mcp.command, "args": mcp.args });
+        if !mcp.env.is_empty() {
+            let env: serde_json::Map<_, _> = mcp
+                .env
+                .iter()
+                .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.clone())))
+                .collect();
+            entry["env"] = serde_json::Value::Object(env);
+        }
+        mcp_servers.insert(mcp.name.to_string(), entry);
     }
     serde_json::json!({ "mcpServers": mcp_servers })
 }
@@ -353,14 +363,20 @@ impl Harness {
                 std::fs::write(dir.join("system-prompt.md"), system_prompt)?;
                 let mut mcp_servers = serde_json::Map::new();
                 for m in mcp {
-                    mcp_servers.insert(
-                        m.name.to_string(),
-                        serde_json::json!({
-                            "type": "local",
-                            "command": std::iter::once(m.command.to_string()).chain(m.args.clone()).collect::<Vec<_>>(),
-                            "enabled": true
-                        }),
-                    );
+                    let mut entry = serde_json::json!({
+                        "type": "local",
+                        "command": std::iter::once(m.command.to_string()).chain(m.args.clone()).collect::<Vec<_>>(),
+                        "enabled": true
+                    });
+                    if !m.env.is_empty() {
+                        let env: serde_json::Map<_, _> = m
+                            .env
+                            .iter()
+                            .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.clone())))
+                            .collect();
+                        entry["environment"] = serde_json::Value::Object(env);
+                    }
+                    mcp_servers.insert(m.name.to_string(), entry);
                 }
                 let config = serde_json::json!({
                     "mcp": mcp_servers,
@@ -661,6 +677,16 @@ fn codex_config_toml(mcp: &[McpServerSpec]) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
+        if !m.env.is_empty() {
+            out.push_str(&format!(
+                "env = {{ {} }}\n",
+                m.env
+                    .iter()
+                    .map(|(k, v)| format!("{k} = \"{v}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
     }
     out
 }
@@ -680,6 +706,7 @@ mod tests {
             name: "playwright",
             command: "npx",
             args: vec!["@playwright/mcp@latest".into()],
+            env: vec![],
         }
     }
 
