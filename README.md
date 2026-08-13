@@ -32,9 +32,9 @@ binary download (macOS/Linux/Windows), and dependencies.
 **Via an AI coding agent** — paste this into your harness (Claude Code,
 Copilot CLI, Codex, etc.):
 
-> Fetch https://raw.githubusercontent.com/MerzoukeMansouri/auto-qa/main/docs/INSTALL.md
-> and follow the instructions in its "For AI agents" section to install the
-> `autoqa` CLI.
+```
+Fetch https://raw.githubusercontent.com/MerzoukeMansouri/auto-qa/main/docs/INSTALL.md and follow the instructions in its "For AI agents" section to install the autoqa CLI.
+```
 
 ## Quick start
 
