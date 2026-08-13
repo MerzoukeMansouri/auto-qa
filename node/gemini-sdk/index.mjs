@@ -9,8 +9,17 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import fs from "node:fs";
 
+const DEFAULT_MODEL = "gemini-3.6-flash";
+
 function parseArgs(argv) {
-  const args = { query: null, systemPromptFile: null, mcpConfigFile: null, maxIterations: 50, raw: false };
+  const args = {
+    query: null,
+    systemPromptFile: null,
+    mcpConfigFile: null,
+    maxIterations: 50,
+    raw: false,
+    model: DEFAULT_MODEL,
+  };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -18,6 +27,7 @@ function parseArgs(argv) {
     else if (a === "--mcp-config-file") args.mcpConfigFile = argv[++i];
     else if (a === "--max-iterations") args.maxIterations = parseInt(argv[++i], 10);
     else if (a === "--raw") args.raw = true;
+    else if (a === "--model") args.model = argv[++i];
     else rest.push(a);
   }
   args.query = rest[0];
@@ -88,7 +98,7 @@ async function main() {
   try {
     for (let iter = 0; iter < args.maxIterations; iter++) {
       const stream = await ai.models.generateContentStream({
-        model: "gemini-3.6-flash",
+        model: args.model,
         contents,
         config: genConfig,
       });

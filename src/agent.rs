@@ -10,7 +10,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 /// the *same* browser via CDP and replay a block's steps deterministically
 /// alongside whatever the agent is doing through Playwright MCP. Common
 /// per-OS install locations for Chrome/Chromium; first match wins.
-fn find_chrome_executable() -> anyhow::Result<std::path::PathBuf> {
+pub(crate) fn find_chrome_executable() -> anyhow::Result<std::path::PathBuf> {
     let candidates: &[&str] = if cfg!(target_os = "macos") {
         &[
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -214,7 +214,12 @@ const SYSTEM_PROMPT: &str = "You must complete this task by driving a real brows
 /// Runs the selected harness wired to the Playwright MCP server (attached,
 /// via CDP, to a Chrome instance autoqa itself launches and owns) and to
 /// autoqa's own `run_block` MCP server, sharing that same CDP endpoint.
-pub async fn cmd_run(harness: Harness, query: &str, locale: &str) -> anyhow::Result<()> {
+pub async fn cmd_run(
+    harness: Harness,
+    query: &str,
+    locale: &str,
+    model: Option<&str>,
+) -> anyhow::Result<()> {
     // Fresh per run — a stale log from a prior run would otherwise get
     // merged into this run's session (see `state::read_run_block_log`).
     state::clear_run_block_log()?;
@@ -242,8 +247,15 @@ pub async fn cmd_run(harness: Harness, query: &str, locale: &str) -> anyhow::Res
     let pw_session_baseline = state::max_pw_session_dir_name().unwrap_or_default();
 
     let (mut chrome, cdp_endpoint) = launch_chrome_with_cdp().await?;
-    let run_result =
-        run_harness(harness, &query, locale, &cdp_endpoint, &pw_session_baseline).await;
+    let run_result = run_harness(
+        harness,
+        &query,
+        locale,
+        &cdp_endpoint,
+        &pw_session_baseline,
+        model,
+    )
+    .await;
 
     // Chrome is autoqa's own child, not the harness's — always tear it down
     // on the way out, run success or failure, or it leaks past this process.
@@ -257,12 +269,13 @@ async fn run_harness(
     locale: &str,
     cdp_endpoint: &str,
     pw_session_baseline: &str,
+    model: Option<&str>,
 ) -> anyhow::Result<()> {
     let mcp_specs = vec![
         playwright_mcp_spec(locale, cdp_endpoint)?,
         block_server_mcp_spec(cdp_endpoint, pw_session_baseline).await?,
     ];
-    let mut cmd = harness.build_run_command(query, &mcp_specs, SYSTEM_PROMPT)?;
+    let mut cmd = harness.build_run_command(query, &mcp_specs, SYSTEM_PROMPT, model)?;
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     let child = cmd.spawn()?;
@@ -288,6 +301,7 @@ pub async fn edit_actions_via_chat(
     harness: Harness,
     current: &[TestStep],
     instruction: &str,
+    model: Option<&str>,
 ) -> anyhow::Result<Vec<TestStep>> {
     let current_json = serde_json::to_string_pretty(current)?;
     let prompt = format!(
@@ -303,7 +317,7 @@ pub async fn edit_actions_via_chat(
     let system_prompt = "You output strictly valid JSON and nothing else. Never wrap output in \
              markdown fences. Never include commentary.";
 
-    let cmd = harness.build_chat_command(&prompt, system_prompt)?;
+    let cmd = harness.build_chat_command(&prompt, system_prompt, model)?;
     let mut cmd = tokio::process::Command::from(cmd);
     let output = cmd.output().await?;
 
@@ -354,6 +368,7 @@ mod tests {
             crate::harness::Harness::Copilot,
             &current,
             "no-op: return unchanged",
+            None,
         )
         .await
         .unwrap();
@@ -371,6 +386,7 @@ mod tests {
             crate::harness::Harness::Opencode,
             &current,
             "no-op: return unchanged",
+            None,
         )
         .await
         .unwrap();

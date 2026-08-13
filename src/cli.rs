@@ -22,12 +22,21 @@ pub enum Commands {
         /// and persists one if none is saved yet.
         #[arg(long, value_enum)]
         harness: Option<Harness>,
+        /// Model to use for this run, overriding whatever's saved for this
+        /// harness in ~/.autoqa/config.json (set via `autoqa config`).
+        /// Without this flag: saved model, or the harness's own default.
+        #[arg(long)]
+        model: Option<String>,
         /// BCP 47 locale for the MCP browser context. Without pinning this,
         /// MCP and any later `playwright test` run can default to different
         /// locales, producing mismatched form input / date formats between
         /// the recorded session and the generated test.
         #[arg(long, default_value = "en-US")]
         locale: String,
+        /// Force a fresh environment check instead of trusting the cached
+        /// result from a prior run (~/.autoqa/doctor.json).
+        #[arg(long)]
+        recheck: bool,
     },
     /// Generate a Playwright .spec.ts from the latest `autoqa run` session.
     Codegen {
@@ -41,10 +50,30 @@ pub enum Commands {
         /// See `run`'s --harness: same resolution (flag > saved config > prompt).
         #[arg(long, value_enum)]
         harness: Option<Harness>,
+        /// See `run`'s --model.
+        #[arg(long)]
+        model: Option<String>,
+        /// See `run`'s --recheck.
+        #[arg(long)]
+        recheck: bool,
     },
-    /// View or change the default harness saved in ~/.autoqa/config.json.
+    /// View or change the default harness/model saved in
+    /// ~/.autoqa/config.json.
     Config {
         /// Set directly, no picker. Omit to open the ratatui picker instead.
+        #[arg(long, value_enum)]
+        harness: Option<Harness>,
+        /// Set the model for the resolved harness directly, no picker. Omit
+        /// with --harness also omitted to chain into the model picker right
+        /// after the harness picker; omit with --harness given to leave the
+        /// saved model untouched.
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Run the environment check on its own, without starting a run/review.
+    /// Always shows the checklist screen, ignoring any cached result.
+    Doctor {
+        /// See `run`'s --harness: same resolution (flag > saved config > prompt).
         #[arg(long, value_enum)]
         harness: Option<Harness>,
     },

@@ -14,24 +14,59 @@ fn config_path() -> PathBuf {
     runtime_dir().join("config.json")
 }
 
+/// Cached result of `doctor::ensure` — a snapshot of what was detected on
+/// disk last time, so a repeat run can skip straight past the checklist
+/// screen when nothing has changed instead of re-running it every time.
+pub fn doctor_path() -> PathBuf {
+    runtime_dir().join("doctor.json")
+}
+
+/// `~/.autoqa/config.json` — the harness picked on a prior first-run prompt,
+/// plus each harness's last-picked model (keyed by `Harness::to_string()`,
+/// since a harness's valid model space is its own — switching harness must
+/// not carry over a model string that means nothing there).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct Config {
+    harness: Option<crate::harness::Harness>,
+    #[serde(default)]
+    models: std::collections::HashMap<String, String>,
+}
+
+fn read_config() -> Config {
+    std::fs::read_to_string(config_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn write_config(c: &Config) -> anyhow::Result<()> {
+    std::fs::create_dir_all(runtime_dir())?;
+    std::fs::write(config_path(), serde_json::to_string_pretty(c)?)?;
+    Ok(())
+}
+
 /// The harness picked on a prior run's first-time prompt, or `None` if
 /// never asked yet (missing file, or one that fails to parse).
 pub fn read_harness_config() -> Option<crate::harness::Harness> {
-    let raw = std::fs::read_to_string(config_path()).ok()?;
-    #[derive(serde::Deserialize)]
-    struct Config {
-        harness: crate::harness::Harness,
-    }
-    serde_json::from_str::<Config>(&raw).ok().map(|c| c.harness)
+    read_config().harness
 }
 
 pub fn write_harness_config(harness: crate::harness::Harness) -> anyhow::Result<()> {
-    std::fs::create_dir_all(runtime_dir())?;
-    std::fs::write(
-        config_path(),
-        serde_json::json!({ "harness": harness }).to_string(),
-    )?;
-    Ok(())
+    let mut c = read_config();
+    c.harness = Some(harness);
+    write_config(&c)
+}
+
+/// The model last picked for this specific harness, or `None` if never set
+/// — callers fall back to the harness's own built-in default in that case.
+pub fn read_model_config(harness: crate::harness::Harness) -> Option<String> {
+    read_config().models.get(&harness.to_string()).cloned()
+}
+
+pub fn write_model_config(harness: crate::harness::Harness, model: &str) -> anyhow::Result<()> {
+    let mut c = read_config();
+    c.models.insert(harness.to_string(), model.to_string());
+    write_config(&c)
 }
 
 /// Where the review UI's Generate/Run/Pause write and execute the test —

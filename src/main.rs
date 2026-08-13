@@ -3,6 +3,7 @@ mod agent;
 mod block;
 mod cli;
 mod commands;
+mod doctor;
 mod harness;
 mod playwright_codegen;
 mod review_server;
@@ -27,6 +28,16 @@ fn resolve_harness(flag: Option<Harness>) -> anyhow::Result<Harness> {
     Ok(h)
 }
 
+/// Resolution order: explicit --model flag, then the model saved for this
+/// harness in ~/.autoqa/config.json. `None` if neither is set — callers
+/// pass that straight through to `Harness::build_run_command`/
+/// `build_chat_command`, which fall back to the harness's own
+/// `default_model()`. Unlike `resolve_harness`, this never prompts: a model
+/// picker only ever runs via `autoqa config`.
+fn resolve_model(harness: Harness, flag: Option<String>) -> Option<String> {
+    flag.or_else(|| state::read_model_config(harness))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -34,19 +45,62 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run {
             query,
             harness,
+            model,
             locale,
-        } => agent::cmd_run(resolve_harness(harness)?, &query, &locale).await,
-        Commands::Codegen { out } => commands::cmd_codegen(&out).await,
-        Commands::Review { port, harness } => {
-            review_server::serve(port, resolve_harness(harness)?).await
+            recheck,
+        } => {
+            let h = resolve_harness(harness)?;
+            doctor::ensure(h, recheck)?;
+            let model = resolve_model(h, model);
+            agent::cmd_run(h, &query, &locale, model.as_deref()).await
         }
-        Commands::Config { harness } => {
+        Commands::Codegen { out } => commands::cmd_codegen(&out).await,
+        Commands::Review {
+            port,
+            harness,
+            model,
+            recheck,
+        } => {
+            let h = resolve_harness(harness)?;
+            doctor::ensure(h, recheck)?;
+            let model = resolve_model(h, model);
+            review_server::serve(port, h, model).await
+        }
+        Commands::Config { harness, model } => {
+            let harness_explicit = harness.is_some();
             let h = match harness {
                 Some(h) => h,
                 None => tui::pick_harness(state::read_harness_config())?,
             };
             state::write_harness_config(h)?;
-            println!("harness set to {h}");
+
+            match model {
+                Some(m) => {
+                    state::write_model_config(h, &m)?;
+                    println!("harness set to {h}, model set to {m}");
+                }
+                // Fully-interactive invocation (`autoqa config`, no flags at
+                // all): chain straight into the model picker too. An
+                // explicit --harness with no --model leaves the saved model
+                // untouched — only the harness changed.
+                None if !harness_explicit => {
+                    let m = tui::pick_model(h, state::read_model_config(h))?;
+                    state::write_model_config(h, &m)?;
+                    println!("harness set to {h}, model set to {m}");
+                }
+                None => {
+                    println!("harness set to {h}");
+                }
+            }
+            Ok(())
+        }
+        Commands::Doctor { harness } => {
+            let h = resolve_harness(harness)?;
+            // Always shows the checklist screen, cache hit or not — unlike
+            // `run`/`review`'s fast path, the whole point of running this
+            // command explicitly is to see it.
+            doctor::ensure(h, true)?;
+            println!("all checks passed for harness '{h}'");
             Ok(())
         }
     }

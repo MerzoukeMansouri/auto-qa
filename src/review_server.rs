@@ -275,11 +275,18 @@ struct ChatRequest {
 /// text task. Only persists on a successful parse, so a malformed model
 /// response can never corrupt actions.json.
 async fn post_chat(
-    State(harness): State<Harness>,
+    State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
     let current = state::read_actions();
-    match agent::edit_actions_via_chat(harness, &current, &req.instruction).await {
+    match agent::edit_actions_via_chat(
+        state.harness,
+        &current,
+        &req.instruction,
+        state.model.as_deref(),
+    )
+    .await
+    {
         Ok(updated) => {
             if let Err(e) = state::write_actions(&updated) {
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -299,7 +306,15 @@ fn open_browser(url: &str) {
     let _ = std::process::Command::new(cmd).arg(url).spawn();
 }
 
-pub async fn serve(port: u16, harness: Harness) -> anyhow::Result<()> {
+/// Router state — the harness/model chosen for this `autoqa review`
+/// invocation, shared read-only across every request handler.
+#[derive(Clone)]
+struct AppState {
+    harness: Harness,
+    model: Option<String>,
+}
+
+pub async fn serve(port: u16, harness: Harness, model: Option<String>) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/actions", get(get_actions).put(put_actions))
         .route("/api/validate", axum::routing::post(post_validate))
@@ -320,7 +335,7 @@ pub async fn serve(port: u16, harness: Harness) -> anyhow::Result<()> {
         .route("/api/tests/:slug/open", axum::routing::post(open_test))
         .route("/api/last-run/open", axum::routing::post(open_last_run))
         .fallback(|uri: axum::http::Uri| async move { serve_asset(uri.path()).await })
-        .with_state(harness);
+        .with_state(AppState { harness, model });
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let url = format!("http://127.0.0.1:{port}");

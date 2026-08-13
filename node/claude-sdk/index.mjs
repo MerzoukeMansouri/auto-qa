@@ -10,11 +10,18 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import fs from "node:fs";
 
-const MODEL = "claude-haiku-4-5";
+const DEFAULT_MODEL = "claude-haiku-4-5";
 const MAX_TOKENS = 8192;
 
 function parseArgs(argv) {
-  const args = { query: null, systemPromptFile: null, mcpConfigFile: null, maxIterations: 50, raw: false };
+  const args = {
+    query: null,
+    systemPromptFile: null,
+    mcpConfigFile: null,
+    maxIterations: 50,
+    raw: false,
+    model: DEFAULT_MODEL,
+  };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -22,6 +29,7 @@ function parseArgs(argv) {
     else if (a === "--mcp-config-file") args.mcpConfigFile = argv[++i];
     else if (a === "--max-iterations") args.maxIterations = parseInt(argv[++i], 10);
     else if (a === "--raw") args.raw = true;
+    else if (a === "--model") args.model = argv[++i];
     else rest.push(a);
   }
   args.query = rest[0];
@@ -86,7 +94,7 @@ async function main() {
   try {
     for (let iter = 0; iter < args.maxIterations; iter++) {
       const stream = client.messages.stream({
-        model: MODEL,
+        model: args.model,
         max_tokens: MAX_TOKENS,
         system,
         messages,

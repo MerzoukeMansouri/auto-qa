@@ -194,12 +194,55 @@ fn mcp_config_json(servers: &[McpServerSpec]) -> serde_json::Value {
 }
 
 impl Harness {
+    /// Built-in fallback used whenever no model is configured/passed —
+    /// `None` for CLI harnesses that never took an explicit model in this
+    /// codebase before model selection existed (copilot/opencode/codex/
+    /// gemini), so an unconfigured run keeps behaving exactly as before:
+    /// no `--model` flag at all, the CLI's own default applies.
+    pub fn default_model(&self) -> Option<&'static str> {
+        match self {
+            Harness::Claude => Some("haiku"),
+            Harness::ClaudeSdk => Some("claude-haiku-4-5"),
+            Harness::GeminiSdk => Some("gemini-3.6-flash"),
+            Harness::Copilot | Harness::Opencode | Harness::Codex | Harness::Gemini => None,
+        }
+    }
+
+    /// A handful of doc-verified models for harnesses whose model space is
+    /// small and stable enough to curate (Anthropic, Google) — used for the
+    /// `autoqa config` arrow-key picker. `None` for harnesses where a
+    /// scriptable/bounded list isn't available (copilot has none; opencode
+    /// returns 100+ dynamic entries across providers), which fall back to a
+    /// free-text prompt instead.
+    pub fn model_choices(&self) -> Option<&'static [&'static str]> {
+        match self {
+            Harness::Claude | Harness::ClaudeSdk => Some(&[
+                "claude-haiku-4-5",
+                "claude-sonnet-5",
+                "claude-opus-5",
+                "claude-fable-5",
+            ]),
+            Harness::Gemini | Harness::GeminiSdk => {
+                Some(&["gemini-3.6-flash", "gemini-3.5-flash-lite"])
+            }
+            Harness::Copilot | Harness::Opencode | Harness::Codex => None,
+        }
+    }
+
+    fn resolved_model(&self, model: Option<&str>) -> Option<String> {
+        model
+            .map(str::to_string)
+            .or_else(|| self.default_model().map(str::to_string))
+    }
+
     pub fn build_run_command(
         &self,
         query: &str,
         mcp: &[McpServerSpec],
         system_prompt: &str,
+        model: Option<&str>,
     ) -> anyhow::Result<std::process::Command> {
+        let model = self.resolved_model(model);
         // Space-separated `mcp__<name>` patterns — Claude's --allowedTools
         // accepts multiple space-separated patterns in one string.
         let allowed_tools = mcp
@@ -215,7 +258,7 @@ impl Harness {
                 cmd.arg("-p")
                     .arg(query)
                     .arg("--model")
-                    .arg("haiku")
+                    .arg(model.as_deref().expect("Claude always has a default_model"))
                     .arg("--mcp-config")
                     .arg(mcp_config_json(mcp).to_string())
                     .arg("--strict-mcp-config")
@@ -262,7 +305,13 @@ impl Harness {
                     .arg("--system-prompt-file")
                     .arg(&system_prompt_path)
                     .arg("--mcp-config-file")
-                    .arg(&mcp_config_path);
+                    .arg(&mcp_config_path)
+                    .arg("--model")
+                    .arg(
+                        model
+                            .as_deref()
+                            .expect("ClaudeSdk always has a default_model"),
+                    );
                 Ok(cmd)
             }
             Harness::Copilot => {
@@ -293,6 +342,9 @@ impl Harness {
                     .arg("--no-custom-instructions")
                     .arg("--disable-builtin-mcps")
                     .env("COPILOT_HOME", &dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 Ok(cmd)
             }
             Harness::Opencode => {
@@ -328,6 +380,9 @@ impl Harness {
                     .arg("json")
                     .arg("--dir")
                     .arg(&dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 Ok(cmd)
             }
             Harness::Codex => {
@@ -351,6 +406,9 @@ impl Harness {
                     // launch instead of the CDP session we hand it).
                     .env("CODEX_HOME", &dir)
                     .current_dir(&dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 Ok(cmd)
             }
             Harness::Gemini => {
@@ -378,6 +436,9 @@ impl Harness {
                     // current_dir above (no project-local .gemini either),
                     // nothing but our own settings.json can load.
                     .env("GEMINI_CLI_HOME", &dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 // Whatever other MCP servers/extensions merge in from the
                 // user's global ~/.gemini config, this locks which ones the
                 // model can actually call to just ours.
@@ -401,7 +462,13 @@ impl Harness {
                     .arg("--system-prompt-file")
                     .arg(&system_prompt_path)
                     .arg("--mcp-config-file")
-                    .arg(&mcp_config_path);
+                    .arg(&mcp_config_path)
+                    .arg("--model")
+                    .arg(
+                        model
+                            .as_deref()
+                            .expect("GeminiSdk always has a default_model"),
+                    );
                 Ok(cmd)
             }
         }
@@ -411,14 +478,16 @@ impl Harness {
         &self,
         prompt: &str,
         system_prompt: &str,
+        model: Option<&str>,
     ) -> anyhow::Result<std::process::Command> {
+        let model = self.resolved_model(model);
         match self {
             Harness::Claude => {
                 let mut cmd = std::process::Command::new("claude");
                 cmd.arg("-p")
                     .arg(prompt)
                     .arg("--model")
-                    .arg("haiku")
+                    .arg(model.as_deref().expect("Claude always has a default_model"))
                     .arg("--append-system-prompt")
                     .arg(system_prompt)
                     .arg("--allowedTools")
@@ -440,7 +509,13 @@ impl Harness {
                     .arg(prompt)
                     .arg("--system-prompt-file")
                     .arg(&system_prompt_path)
-                    .arg("--raw");
+                    .arg("--raw")
+                    .arg("--model")
+                    .arg(
+                        model
+                            .as_deref()
+                            .expect("ClaudeSdk always has a default_model"),
+                    );
                 Ok(cmd)
             }
             Harness::Copilot => {
@@ -455,6 +530,9 @@ impl Harness {
                     .arg("--no-custom-instructions")
                     .arg("--disable-builtin-mcps")
                     .env("COPILOT_HOME", &dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 Ok(cmd)
             }
             Harness::Opencode => {
@@ -473,6 +551,9 @@ impl Harness {
                     .arg("--pure")
                     .arg("--dir")
                     .arg(&dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 Ok(cmd)
             }
             Harness::Codex => {
@@ -491,6 +572,9 @@ impl Harness {
                     .arg("--dangerously-bypass-approvals-and-sandbox")
                     .env("CODEX_HOME", &dir)
                     .current_dir(&dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 Ok(cmd)
             }
             Harness::Gemini => {
@@ -508,6 +592,9 @@ impl Harness {
                     .current_dir(&dir)
                     .env("GEMINI_SYSTEM_MD", &system_prompt_path)
                     .env("GEMINI_CLI_HOME", &dir);
+                if let Some(m) = &model {
+                    cmd.arg("--model").arg(m);
+                }
                 Ok(cmd)
             }
             Harness::GeminiSdk => {
@@ -525,7 +612,13 @@ impl Harness {
                     .arg(prompt)
                     .arg("--system-prompt-file")
                     .arg(&system_prompt_path)
-                    .arg("--raw");
+                    .arg("--raw")
+                    .arg("--model")
+                    .arg(
+                        model
+                            .as_deref()
+                            .expect("GeminiSdk always has a default_model"),
+                    );
                 Ok(cmd)
             }
         }
@@ -591,9 +684,50 @@ mod tests {
     }
 
     #[test]
+    fn claude_run_uses_default_model_when_unset() {
+        let cmd = Harness::Claude
+            .build_run_command("q", &[playwright_spec()], "sys", None)
+            .unwrap();
+        let a = argv(&cmd);
+        let i = a.iter().position(|s| s == "--model").unwrap();
+        assert_eq!(a[i + 1], "haiku");
+    }
+
+    #[test]
+    fn claude_run_model_override_replaces_default() {
+        let cmd = Harness::Claude
+            .build_run_command("q", &[playwright_spec()], "sys", Some("claude-opus-5"))
+            .unwrap();
+        let a = argv(&cmd);
+        let i = a.iter().position(|s| s == "--model").unwrap();
+        assert_eq!(a[i + 1], "claude-opus-5");
+    }
+
+    #[test]
+    fn copilot_run_omits_model_flag_when_unset() {
+        // Copilot has no default_model — an unconfigured run must keep
+        // behaving exactly as before model selection existed: no --model
+        // flag at all, the CLI's own default applies.
+        let cmd = Harness::Copilot
+            .build_run_command("q", &[playwright_spec()], "sys", None)
+            .unwrap();
+        assert!(!argv(&cmd).contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn copilot_run_passes_model_flag_when_set() {
+        let cmd = Harness::Copilot
+            .build_run_command("q", &[playwright_spec()], "sys", Some("gpt-5.4"))
+            .unwrap();
+        let a = argv(&cmd);
+        let i = a.iter().position(|s| s == "--model").unwrap();
+        assert_eq!(a[i + 1], "gpt-5.4");
+    }
+
+    #[test]
     fn claude_run_argv_is_isolated_from_user_config() {
         let cmd = Harness::Claude
-            .build_run_command("do the thing", &[playwright_spec()], "sys prompt")
+            .build_run_command("do the thing", &[playwright_spec()], "sys prompt", None)
             .unwrap();
         let a = argv(&cmd);
         assert_eq!(a[0], "claude");
@@ -607,7 +741,7 @@ mod tests {
     #[test]
     fn codex_run_sets_codex_home_env() {
         let cmd = Harness::Codex
-            .build_run_command("q", &[playwright_spec()], "sys")
+            .build_run_command("q", &[playwright_spec()], "sys", None)
             .unwrap();
         assert!(cmd
             .get_envs()
@@ -620,7 +754,7 @@ mod tests {
         // independent of CODEX_HOME — running from the caller's actual
         // project would merge in whatever instructions/skills live there.
         let cmd = Harness::Codex
-            .build_run_command("q", &[playwright_spec()], "sys")
+            .build_run_command("q", &[playwright_spec()], "sys", None)
             .unwrap();
         let cwd = cmd.get_current_dir().expect("current_dir must be set");
         assert!(cwd.ends_with("codex-run"));
@@ -650,7 +784,7 @@ mod tests {
     #[test]
     fn gemini_env_points_at_system_prompt_file_containing_prompt_text() {
         let cmd = Harness::Gemini
-            .build_run_command("q", &[playwright_spec()], "unique sys prompt text")
+            .build_run_command("q", &[playwright_spec()], "unique sys prompt text", None)
             .unwrap();
         let path = cmd
             .get_envs()
@@ -668,7 +802,7 @@ mod tests {
     #[test]
     fn copilot_run_sets_copilot_home_env() {
         let cmd = Harness::Copilot
-            .build_run_command("q", &[playwright_spec()], "sys")
+            .build_run_command("q", &[playwright_spec()], "sys", None)
             .unwrap();
         assert!(cmd
             .get_envs()
@@ -678,7 +812,7 @@ mod tests {
     #[test]
     fn opencode_jsonc_is_valid_json_with_mcp_and_instructions_keys() {
         Harness::Opencode
-            .build_run_command("q", &[playwright_spec()], "sys")
+            .build_run_command("q", &[playwright_spec()], "sys", None)
             .unwrap();
         let dir = scratch_dir("opencode-run");
         let contents = std::fs::read_to_string(dir.join("opencode.jsonc")).unwrap();

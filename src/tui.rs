@@ -93,6 +93,148 @@ pub fn pick_harness(
     result
 }
 
+/// Model picker for `autoqa config`. Dispatches per harness: an arrow-key
+/// list for harnesses with a small, doc-curated model set
+/// (`Harness::model_choices`), a free-text prompt otherwise (copilot has no
+/// scriptable model list; opencode's is 100+ dynamic entries — neither is
+/// worth curating by hand).
+pub fn pick_model(
+    harness: crate::harness::Harness,
+    current: Option<String>,
+) -> anyhow::Result<String> {
+    match harness.model_choices() {
+        Some(choices) => pick_model_from_list(choices, current),
+        None => prompt_text("Enter model", current),
+    }
+}
+
+fn pick_model_from_list(choices: &[&str], current: Option<String>) -> anyhow::Result<String> {
+    let mut term = enter_tui()?;
+    let mut cursor = current
+        .as_deref()
+        .and_then(|c| choices.iter().position(|m| *m == c))
+        .unwrap_or(0);
+
+    let result = loop {
+        term.draw(|f| {
+            let area = f.area();
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(3), Constraint::Length(3)])
+                .split(area);
+
+            let items: Vec<ListItem> = choices
+                .iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    let style = if i == cursor {
+                        Style::default().add_modifier(Modifier::REVERSED)
+                    } else {
+                        Style::default()
+                    };
+                    let marker = if current.as_deref() == Some(*m) {
+                        " (current)"
+                    } else {
+                        ""
+                    };
+                    ListItem::new(format!("{m}{marker}")).style(style)
+                })
+                .collect();
+            f.render_widget(
+                List::new(items).block(
+                    UiBlock::default()
+                        .borders(Borders::ALL)
+                        .title("Pick a model"),
+                ),
+                rows[0],
+            );
+
+            let help = "↑/↓: move  Enter: select  q/Esc: cancel";
+            f.render_widget(
+                Paragraph::new(help)
+                    .wrap(Wrap { trim: true })
+                    .block(UiBlock::default().borders(Borders::ALL)),
+                rows[1],
+            );
+        })?;
+
+        if !event::poll(Duration::from_millis(200))? {
+            continue;
+        }
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        match key.code {
+            KeyCode::Up => cursor = (cursor + choices.len() - 1) % choices.len(),
+            KeyCode::Down => cursor = (cursor + 1) % choices.len(),
+            KeyCode::Enter => break Ok(choices[cursor].to_string()),
+            KeyCode::Esc | KeyCode::Char('q') => {
+                break Err(anyhow::anyhow!("model selection cancelled"))
+            }
+            _ => {}
+        }
+    };
+
+    leave_tui()?;
+    result
+}
+
+/// Single-line free-text input screen — Enter submits (empty input keeps
+/// `current` if any, otherwise re-prompts since a blank model is never
+/// useful), Esc/q cancels.
+fn prompt_text(title: &str, current: Option<String>) -> anyhow::Result<String> {
+    let mut term = enter_tui()?;
+    let mut buf = current.clone().unwrap_or_default();
+
+    let result = loop {
+        term.draw(|f| {
+            let area = f.area();
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Length(3)])
+                .split(area);
+
+            f.render_widget(
+                Paragraph::new(buf.as_str())
+                    .block(UiBlock::default().borders(Borders::ALL).title(title)),
+                rows[0],
+            );
+            let help = "Enter: confirm  q/Esc: cancel";
+            f.render_widget(
+                Paragraph::new(help)
+                    .wrap(Wrap { trim: true })
+                    .block(UiBlock::default().borders(Borders::ALL)),
+                rows[1],
+            );
+        })?;
+
+        if !event::poll(Duration::from_millis(200))? {
+            continue;
+        }
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        match key.code {
+            KeyCode::Char(c) => buf.push(c),
+            KeyCode::Backspace => {
+                buf.pop();
+            }
+            KeyCode::Enter if !buf.trim().is_empty() => break Ok(buf.trim().to_string()),
+            KeyCode::Esc => break Err(anyhow::anyhow!("model entry cancelled")),
+            _ => {}
+        }
+    };
+
+    leave_tui()?;
+    result
+}
+
 /// A block chosen in the pre-run picker, in run order, with every
 /// `{{placeholder}}` it needs bound to a param name — the agent is
 /// instructed to replay these via `run_block` before touching the task.
