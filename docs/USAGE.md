@@ -76,9 +76,10 @@ re-driving the same setup steps through the browser every time.
 ## Doctor
 
 ```
-autoqa doctor              # run the environment check on its own
+autoqa doctor                    # run the environment check on its own
 autoqa doctor --harness gemini-sdk
-autoqa run --recheck ...   # force a fresh check instead of trusting the cache
+autoqa run --recheck ...         # force a fresh check instead of trusting the cache
+autoqa run --no-verification ... # skip it entirely for this run
 ```
 
 `autoqa run`/`autoqa review` run this automatically before doing anything

@@ -48,9 +48,12 @@ async fn main() -> anyhow::Result<()> {
             model,
             locale,
             recheck,
+            no_verification,
         } => {
             let h = resolve_harness(harness)?;
-            doctor::ensure(h, recheck)?;
+            if !no_verification {
+                doctor::ensure(h, recheck)?;
+            }
             let model = resolve_model(h, model);
             agent::cmd_run(h, &query, &locale, model.as_deref()).await
         }
@@ -60,9 +63,12 @@ async fn main() -> anyhow::Result<()> {
             harness,
             model,
             recheck,
+            no_verification,
         } => {
             let h = resolve_harness(harness)?;
-            doctor::ensure(h, recheck)?;
+            if !no_verification {
+                doctor::ensure(h, recheck)?;
+            }
             let model = resolve_model(h, model);
             review_server::serve(port, h, model).await
         }

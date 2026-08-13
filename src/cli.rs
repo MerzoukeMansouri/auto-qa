@@ -37,6 +37,11 @@ pub enum Commands {
         /// result from a prior run (~/.autoqa/doctor.json).
         #[arg(long)]
         recheck: bool,
+        /// Skip the environment check entirely (Node/Chrome/harness) — for
+        /// when you already know it's set up and just want to go. Overrides
+        /// --recheck if both are somehow given.
+        #[arg(long)]
+        no_verification: bool,
     },
     /// Generate a Playwright .spec.ts from the latest `autoqa run` session.
     Codegen {
@@ -56,6 +61,9 @@ pub enum Commands {
         /// See `run`'s --recheck.
         #[arg(long)]
         recheck: bool,
+        /// See `run`'s --no-verification.
+        #[arg(long)]
+        no_verification: bool,
     },
     /// View or change the default harness/model saved in
     /// ~/.autoqa/config.json.
