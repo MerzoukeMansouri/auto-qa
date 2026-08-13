@@ -71,12 +71,33 @@ autoqa config                                   # interactive picker instead
 
 Supported: `claude`, `copilot`, `opencode`, `codex`, `gemini` — each needs its
 own CLI installed and authenticated (`claude`, `copilot`, `opencode`, `codex`,
-`gemini` respectively) on `$PATH`.
+`gemini` respectively) on `$PATH`. Also `claude-sdk` and `gemini-sdk` — own
+agent loop against the Anthropic/Gemini API directly (no CLI subprocess),
+authenticated via `ANTHROPIC_API_KEY`/`GEMINI_API_KEY` instead.
 
 Resolution order for `run`/`review`, every time: an explicit `--harness` flag
 wins; otherwise the harness saved in `~/.autoqa/config.json` is used; if
 neither is set, you're prompted once (same picker as `autoqa config`) and the
 choice is persisted for next time.
+
+### Choosing a model
+
+```
+autoqa run --model claude-opus-5 --query "..."   # this run only
+autoqa config --model gemini-3.5-flash-lite      # change the saved default for the current harness
+autoqa config                                     # interactive: harness picker, then model picker
+```
+
+Each harness remembers its own model in `~/.autoqa/config.json` — switching
+harness doesn't carry a model string over that means nothing there. `autoqa
+config` with no flags picks from an arrow-key list for harnesses with a
+small, stable model set (`claude`/`claude-sdk`: `claude-haiku-4-5` (default),
+`claude-sonnet-5`, `claude-opus-5`, `claude-fable-5`; `gemini`/`gemini-sdk`:
+`gemini-3.6-flash` (default), `gemini-3.5-flash-lite`) or a free-text prompt
+for the rest (`copilot`, `opencode`, `codex` — no bounded list to curate, the
+model string goes straight to that CLI's own `--model`/`-m` flag). Same
+resolution order as harness: `--model` flag, then the saved value, then the
+harness's own default.
 
 ### Reusable blocks
 
