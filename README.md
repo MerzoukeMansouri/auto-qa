@@ -39,7 +39,7 @@ Copilot CLI, Codex, etc.):
 ## Quick start
 
 ```
-autoqa run --query "go to example.com and tell me the page title"
+autoqa run --harness opencode --query "go to https://demo.playwright.dev/todomvc/, verify a new todo item can be added, verify each item's completed status can be toggled, and verify an item can be deleted"
 autoqa review    # turn the recorded session into a Playwright test
 ```
 
