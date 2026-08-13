@@ -39,6 +39,7 @@ Fetch https://raw.githubusercontent.com/MerzoukeMansouri/auto-qa/main/docs/INSTA
 ## Quick start
 
 ```
+autoqa doctor    # check Node/Chrome/harness are ready (also runs automatically before run/review)
 autoqa run --harness opencode --query "go to https://demo.playwright.dev/todomvc/, verify a new todo item can be added, verify each item's completed status can be toggled, and verify an item can be deleted"
 autoqa review    # turn the recorded session into a Playwright test
 ```
