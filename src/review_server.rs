@@ -151,7 +151,13 @@ async fn ensure_playwright_tests_stack() -> anyhow::Result<()> {
     }
 
     let status = tokio::process::Command::new("npm")
-        .args(["install", "-D", "@playwright/test"])
+        .args([
+            "install",
+            "-D",
+            "@playwright/test",
+            "--registry",
+            state::NPM_PUBLIC_REGISTRY,
+        ])
         .current_dir(&dir)
         .status()
         .await?;
