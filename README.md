@@ -45,9 +45,12 @@ autoqa review    # turn the recorded session into a Playwright test
 
 ## Documentation
 
-| | |
-|---|---|
-| [Install](docs/INSTALL.md) | Homebrew, manual binary, dependencies, troubleshooting |
-| [Usage](docs/USAGE.md) | Running a task, choosing a harness/model, reusable blocks |
-| [Review & codegen](docs/REVIEW.md) | Turning a recorded session into a Playwright test |
-| [Implementation notes](docs/IMPLEMENTATION.md) | Selector strategy, session parsing, harness-specific quirks |
+- [Install](docs/INSTALL.md) — Homebrew, manual binary, dependencies, troubleshooting
+  - [Environment check](docs/INSTALL.md#environment-check)
+- [Usage](docs/USAGE.md)
+  - [Running a task](docs/USAGE.md#running-a-task)
+  - [Choosing a harness](docs/USAGE.md#choosing-a-harness)
+  - [Choosing a model](docs/USAGE.md#choosing-a-model)
+  - [Reusable blocks](docs/USAGE.md#reusable-blocks)
+- [Review & codegen](docs/REVIEW.md) — turning a recorded session into a Playwright test
+- [Implementation notes](docs/IMPLEMENTATION.md) — selector strategy, session parsing, harness-specific quirks
