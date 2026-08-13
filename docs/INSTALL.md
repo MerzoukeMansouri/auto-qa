@@ -103,7 +103,12 @@ GitHub API lookup for the current release's download URL.
 ## Dependencies
 
 autoqa doesn't bundle a browser or a coding-agent CLI — it drives ones
-already on the machine.
+already on the machine. On every `autoqa run`/`autoqa review`, it checks all
+of this itself first (a ratatui screen, live logs, nothing silent) and
+auto-installs the two items it's allowed to manage on your behalf
+(its own npm deps, and Playwright's chromium download for the test-replay
+path) — see [Environment check](#environment-check) below. The rest still
+needs manual setup:
 
 - **Chrome or Chromium**, at one of these exact paths (`autoqa run` looks
   here and nowhere else):
@@ -116,7 +121,7 @@ already on the machine.
   - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe` (or the
     `(x86)` path) — install from
     [google.com/chrome](https://www.google.com/chrome/).
-- **Node.js + npm** (any recent LTS) — used to run Playwright MCP and
+- **Node.js + npm, version 20 or newer** — used to run Playwright MCP and
   autoqa's own block-server via `npx`/`npm`.
   - macOS: `brew install node`
   - Linux: `sudo apt install nodejs npm` or your distro's equivalent
@@ -126,6 +131,21 @@ already on the machine.
   `claude` (Claude Code), `copilot` (GitHub Copilot CLI), `opencode`,
   `codex`, or `gemini`. Install and auth each per its own docs — autoqa just
   shells out to whichever one you pick with `--harness`.
+
+## Environment check
+
+`autoqa run` and `autoqa review` open a checklist screen before doing
+anything else, listing Node, system Chrome, the chosen harness CLI, and
+autoqa's own npm-based deps (block-server, and Playwright's chromium
+download used by the generated-test replay path). Node/Chrome/harness CLI
+are detect-only — those are yours to install, autoqa just tells you what's
+missing and blocks until it's fixed. The npm-based items get installed
+automatically, with the install output streamed live into the same screen.
+
+The result is cached (`~/.autoqa/doctor.json`) so a repeat run with nothing
+changed skips straight past this screen. Pass `--recheck` to force it to
+run again regardless of the cache. Run it on its own, without starting a
+run/review, via `autoqa doctor`.
 
 ## Verify
 
@@ -156,9 +176,11 @@ Manual install: delete the binary from wherever you placed it (e.g.
   again after tapping.
 - **`Unknown command: brew trust`** — your Homebrew is too old; the `trust`
   command is a recent addition. Run `brew update` first.
-- **`autoqa run` fails with "no Chrome/Chromium executable found"** — install
-  Chrome/Chromium at one of the exact paths listed under
-  [Dependencies](#dependencies); autoqa doesn't search `PATH` for it.
+- **`autoqa run` blocks on the environment check** — the checklist screen
+  names exactly which item failed (Node version, Chrome path, harness CLI)
+  and how to fix it; install/upgrade that one thing and rerun (or pass
+  `--recheck` if you've already fixed it but the cache hasn't caught up —
+  it shouldn't need to, but the flag exists as an escape hatch).
 - **manual install: `command not found: autoqa` after installing** — the
   install directory isn't on `PATH` yet in your *current* shell; open a new
   terminal, or re-source your shell rc file (`source ~/.zshrc`, etc.).
