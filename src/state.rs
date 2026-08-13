@@ -1,6 +1,15 @@
 use crate::block::{Block, Param, Test, TestStep};
 use std::path::PathBuf;
 
+/// Forced on every `npm install` autoqa runs for its own bundled deps
+/// (block-server, claude-sdk, gemini-sdk) — those are pinned to specific
+/// public packages autoqa itself controls, unrelated to whatever registry
+/// a user's own npm config points at (a corporate proxy/Artifactory mirror
+/// that doesn't carry `@modelcontextprotocol/sdk` 404s otherwise). Not
+/// applied to the user's own `playwright-tests/` project install, which
+/// should keep respecting their normal npm config.
+pub const NPM_PUBLIC_REGISTRY: &str = "https://registry.npmjs.org/";
+
 pub fn runtime_dir() -> PathBuf {
     let home = std::env::var("HOME").expect("HOME not set");
     PathBuf::from(home).join(".autoqa")

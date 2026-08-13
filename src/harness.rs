@@ -144,7 +144,7 @@ fn ensure_gemini_sdk_script() -> anyhow::Result<PathBuf> {
 
     if !dir.join("node_modules").is_dir() {
         let status = std::process::Command::new("npm")
-            .args(["install"])
+            .args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
             .current_dir(&dir)
             .status()?;
         anyhow::ensure!(
@@ -171,7 +171,7 @@ fn ensure_claude_sdk_script() -> anyhow::Result<PathBuf> {
 
     if !dir.join("node_modules").is_dir() {
         let status = std::process::Command::new("npm")
-            .args(["install"])
+            .args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
             .current_dir(&dir)
             .status()?;
         anyhow::ensure!(

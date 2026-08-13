@@ -79,16 +79,14 @@ async fn launch_chrome_with_cdp() -> anyhow::Result<(tokio::process::Child, Stri
     Ok((child, endpoint))
 }
 
-/// autoqa's own MCP server (node/block-server) — exposes `list_blocks` and
-/// `run_block` to the agent, replaying a block's steps via `connectOverCDP`
-/// against the same browser Playwright MCP is driving (see
-/// `launch_chrome_with_cdp`). The script + its package.json are embedded in
-/// the binary (a Homebrew install has no `node/` dir alongside it) and
-/// written out to the runtime dir on first use.
-async fn block_server_mcp_spec(
-    cdp_endpoint: &str,
-    pw_session_baseline: &str,
-) -> anyhow::Result<McpServerSpec> {
+/// Writes `node/block-server`'s script + package.json out to the runtime
+/// dir — embedded in the binary (a Homebrew install has no `node/` dir
+/// alongside it), so this has to run before anything can `npm install` or
+/// `node server.mjs` there. Shared with `doctor.rs`'s auto-install step,
+/// which used to skip this and run `npm install` in a directory that didn't
+/// exist yet on a machine with no prior `autoqa` run — "No such file or
+/// directory".
+pub(crate) fn write_block_server_files() -> anyhow::Result<std::path::PathBuf> {
     let dir = state::runtime_dir().join("block-server");
     std::fs::create_dir_all(&dir)?;
     std::fs::write(
@@ -99,10 +97,22 @@ async fn block_server_mcp_spec(
         dir.join("server.mjs"),
         include_str!("../node/block-server/server.mjs"),
     )?;
+    Ok(dir)
+}
+
+/// autoqa's own MCP server (node/block-server) — exposes `list_blocks` and
+/// `run_block` to the agent, replaying a block's steps via `connectOverCDP`
+/// against the same browser Playwright MCP is driving (see
+/// `launch_chrome_with_cdp`).
+async fn block_server_mcp_spec(
+    cdp_endpoint: &str,
+    pw_session_baseline: &str,
+) -> anyhow::Result<McpServerSpec> {
+    let dir = write_block_server_files()?;
 
     if !dir.join("node_modules").is_dir() {
         let status = tokio::process::Command::new("npm")
-            .args(["install"])
+            .args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
             .current_dir(&dir)
             .status()
             .await?;

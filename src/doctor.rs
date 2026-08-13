@@ -492,6 +492,11 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
     // Auto-installs, one at a time so the log pane reads as one coherent
     // stream instead of interleaved output from parallel npm/npx calls.
     if !fresh.block_server_deps {
+        // Embed the script + package.json first — `npm install`'s
+        // current_dir fails with "No such file or directory" if this
+        // hasn't run yet (e.g. `autoqa doctor` on a machine with no prior
+        // `autoqa run`).
+        crate::agent::write_block_server_files()?;
         run_install(
             &mut term,
             &mut rows,
@@ -521,10 +526,11 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
         )?;
     }
 
-    let blocked: Vec<&Row> = rows
-        .iter()
-        .filter(|r| r.blocking || r.status == Status::Failed)
-        .collect();
+    // `blocking` alone, not `Status::Failed` — a Failed row can be an
+    // unrelated harness the user never picked (e.g. codex not installed
+    // while claude is selected), which must never block getting past this
+    // screen. Every row that should block already has `blocking` set.
+    let blocked: Vec<&Row> = rows.iter().filter(|r| r.blocking).collect();
     let final_snapshot = detect(harness);
     if blocked.is_empty() {
         let _ = write_cache(&final_snapshot);
@@ -548,9 +554,13 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
     }
 }
 
+/// Only ever called for autoqa's own bundled dep dirs (block-server,
+/// claude-sdk, gemini-sdk) — never the user's `playwright-tests/` project,
+/// which has its own separate install in review_server.rs.
 fn npm_install_cmd(dir: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new("npm");
-    cmd.arg("install").current_dir(dir);
+    cmd.args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
+        .current_dir(dir);
     cmd
 }
 
@@ -621,6 +631,11 @@ fn run_install(
         } else {
             Status::Failed
         };
+        // These three rows (block-server/sdk deps, Playwright chromium) are
+        // always-needed, not per-harness alternatives — unlike the
+        // per-harness CLI/API-key checks, a failed install here always
+        // blocks, regardless of which harness is selected.
+        row.blocking = !status.success();
         if !status.success() {
             row.detail = format!("exited with {status}");
         }
