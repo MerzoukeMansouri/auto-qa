@@ -19,37 +19,21 @@ fn is_sdk_harness(h: Harness) -> bool {
     matches!(h, Harness::ClaudeSdk | Harness::GeminiSdk)
 }
 
-/// CLI-driven harnesses, derived from `harness::ALL` (the one hardcoded
-/// list) instead of a second one — adding/removing a `Harness` variant only
-/// ever needs to change `harness::ALL` and, if it's an `*Sdk` variant,
-/// `is_sdk_harness`.
-fn cli_harnesses() -> impl Iterator<Item = Harness> {
-    crate::harness::ALL
-        .iter()
-        .copied()
-        .filter(|h| !is_sdk_harness(*h))
-}
-
-fn sdk_harnesses() -> impl Iterator<Item = Harness> {
-    crate::harness::ALL
-        .iter()
-        .copied()
-        .filter(|h| is_sdk_harness(*h))
-}
-
-/// Snapshot of what was detected on a prior `doctor::ensure` pass. Compared
-/// field-for-field against a fresh (install-free) detection on every run —
-/// equal ⇒ skip the checklist screen entirely. Any drift (a `brew upgrade`,
-/// a `nvm use` swap, an npm dir wiped by hand, an API key exported/unset)
-/// naturally invalidates it without tracking timestamps. Covers every known
-/// harness, not just the one currently selected, so the checklist gives a
-/// full picture — only the selected harness's row can actually block.
+/// Snapshot of what was detected on a prior `doctor::ensure` pass, scoped to
+/// whichever harness was selected at the time. Compared field-for-field
+/// against a fresh (install-free) detection on every run — equal ⇒ skip the
+/// checklist screen entirely. Any drift (a `brew upgrade`, a `nvm use` swap,
+/// an npm dir wiped by hand, an API key exported/unset, or a different
+/// harness picked) naturally invalidates it without tracking timestamps.
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Clone, Debug, Default)]
 struct Snapshot {
     node_version: Option<String>,
     chrome_path: Option<String>,
-    cli_harnesses: Vec<(String, Option<String>)>,
-    sdk_api_keys: Vec<(String, bool)>,
+    harness: Option<String>,
+    /// CLI `--version` output for a CLI harness, or `Some("set")` for an
+    /// `*Sdk` harness with its API key present — `None` either way means
+    /// the harness isn't usable yet.
+    harness_status: Option<String>,
     block_server_deps: bool,
     sdk_deps: bool,
     chromium_installed: bool,
@@ -70,8 +54,6 @@ struct Row {
     /// Detect-only rows that came back missing/too-old block the run —
     /// distinct from a `Failed` auto-install, which is also blocking but
     /// came from a command we ran ourselves rather than the environment.
-    /// Only ever true for rows tied to the currently selected harness —
-    /// every other harness's row is shown for visibility but never blocks.
     blocking: bool,
 }
 
@@ -86,30 +68,20 @@ pub fn ensure(harness: Harness, recheck: bool) -> anyhow::Result<()> {
     let fresh = detect(harness);
     let cached = (!recheck).then(read_cache).flatten();
 
-    if cached.as_ref() == Some(&fresh) && all_ok(&fresh, harness) {
+    if cached.as_ref() == Some(&fresh) && all_ok(&fresh) {
         return Ok(());
     }
 
     run_checklist(harness)
 }
 
-fn all_ok(s: &Snapshot, harness: Harness) -> bool {
-    if s.node_version.is_none()
-        || s.chrome_path.is_none()
-        || !s.block_server_deps
-        || !s.sdk_deps
-        || !s.chromium_installed
-    {
-        return false;
-    }
-    let name = harness.to_string();
-    if is_sdk_harness(harness) {
-        s.sdk_api_keys.iter().any(|(n, ok)| *n == name && *ok)
-    } else {
-        s.cli_harnesses
-            .iter()
-            .any(|(n, v)| *n == name && v.is_some())
-    }
+fn all_ok(s: &Snapshot) -> bool {
+    s.node_version.is_some()
+        && s.chrome_path.is_some()
+        && s.harness_status.is_some()
+        && s.block_server_deps
+        && s.sdk_deps
+        && s.chromium_installed
 }
 
 fn read_cache() -> Option<Snapshot> {
@@ -124,19 +96,18 @@ fn write_cache(s: &Snapshot) -> anyhow::Result<()> {
 }
 
 /// Cheap, install-free detection pass — no network, no subprocess spawns
-/// beyond `--version` probes (one per known CLI harness), safe to run on
-/// every single invocation.
+/// beyond one `--version`/API-key probe for the selected harness, safe to
+/// run on every single invocation.
 fn detect(harness: Harness) -> Snapshot {
     let node_version = detect_node();
     let chrome_path = crate::agent::find_chrome_executable()
         .ok()
         .map(|p| p.display().to_string());
-    let cli_harnesses = cli_harnesses()
-        .map(|h| (h.to_string(), detect_harness_cli(h)))
-        .collect();
-    let sdk_api_keys = sdk_harnesses()
-        .map(|h| (h.to_string(), api_key_present(h)))
-        .collect();
+    let harness_status = if is_sdk_harness(harness) {
+        api_key_present(harness).then(|| "set".to_string())
+    } else {
+        detect_harness_cli(harness)
+    };
     let block_server_deps = state::runtime_dir()
         .join("block-server")
         .join("node_modules")
@@ -147,8 +118,8 @@ fn detect(harness: Harness) -> Snapshot {
     Snapshot {
         node_version,
         chrome_path,
-        cli_harnesses,
-        sdk_api_keys,
+        harness: Some(harness.to_string()),
+        harness_status,
         block_server_deps,
         sdk_deps,
         chromium_installed,
@@ -272,11 +243,9 @@ fn set_running(rows: &mut [Row], label: &str) {
 }
 
 /// Runs one detect-only check whose result is "found this value, or not" —
-/// Node/Chrome versions, per-harness CLI `--version`, per-harness API key
+/// Node/Chrome versions, the selected harness's CLI version or API key
 /// presence. Flips the row Pending -> Running -> Ok/Failed with a redraw in
 /// between so it's visible as it happens, not just as a final static state.
-/// `blocking` should only ever be true for the row of the currently
-/// selected harness — every other harness's row is informational.
 fn run_detect_opt(
     term: &mut Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
     rows: &mut [Row],
@@ -284,7 +253,6 @@ fn run_detect_opt(
     label: &str,
     check: impl FnOnce() -> Option<String>,
     missing_detail: impl FnOnce() -> String,
-    blocking: bool,
 ) -> anyhow::Result<Option<String>> {
     set_running(rows, label);
     draw(term, rows, log)?;
@@ -296,7 +264,7 @@ fn run_detect_opt(
             Status::Failed
         };
         row.detail = value.clone().unwrap_or_else(missing_detail);
-        row.blocking = blocking && value.is_none();
+        row.blocking = value.is_none();
     }
     draw(term, rows, log)?;
     Ok(value)
@@ -327,15 +295,20 @@ fn run_detect_bool(
 /// cheap detect-only ones — flips Pending -> Running -> Ok/Failed with a
 /// redraw in between, so a first run (nothing cached yet) reads as "actively
 /// checking your system" instead of a screen that appears already resolved.
-/// Checks every known harness (CLI `--version`, or API key for the `*Sdk`
-/// ones), not just the selected one, so the list doubles as "what's ready to
-/// switch to" — the `→ ` marker flags the one actually in use, and only its
-/// row can block. Streams each auto-install's combined stdout/stderr into
-/// the log pane as it happens. Never attempts to install Node, a browser, a
-/// harness CLI, or set an API key itself.
+/// Only ever checks the selected harness — no rows for the other 6, so
+/// there's nothing unrelated that could ever block the run. Streams each
+/// auto-install's combined stdout/stderr into the log pane as it happens.
+/// Never attempts to install Node, a browser, a harness CLI, or set an API
+/// key itself.
 fn run_checklist(harness: Harness) -> anyhow::Result<()> {
     let mut term = enter_tui()?;
     let mut log: Vec<String> = vec!["Checking your system...".to_string()];
+
+    let harness_label = if is_sdk_harness(harness) {
+        format!("{harness} API key ({})", api_key_env_var(harness))
+    } else {
+        format!("Harness CLI ({harness})")
+    };
 
     let mut rows = vec![
         Row {
@@ -350,35 +323,13 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
             detail: String::new(),
             blocking: false,
         },
+        Row {
+            label: harness_label.clone(),
+            status: Status::Pending,
+            detail: String::new(),
+            blocking: false,
+        },
     ];
-    let marker = |h: Harness| if h == harness { "→ " } else { "" };
-    let cli_rows: Vec<(Harness, String)> = cli_harnesses()
-        .map(|h| (h, format!("{}Harness CLI ({h})", marker(h))))
-        .collect();
-    for (_, label) in &cli_rows {
-        rows.push(Row {
-            label: label.clone(),
-            status: Status::Pending,
-            detail: String::new(),
-            blocking: false,
-        });
-    }
-    let sdk_key_rows: Vec<(Harness, String)> = sdk_harnesses()
-        .map(|h| {
-            (
-                h,
-                format!("{}{h} API key ({})", marker(h), api_key_env_var(h)),
-            )
-        })
-        .collect();
-    for (_, label) in &sdk_key_rows {
-        rows.push(Row {
-            label: label.clone(),
-            status: Status::Pending,
-            detail: String::new(),
-            blocking: false,
-        });
-    }
     rows.push(Row {
         label: "autoqa-blocks server deps".to_string(),
         status: Status::Pending,
@@ -409,7 +360,6 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
         "Node.js >= 20",
         detect_node,
         || "not found, or older than 20 — install from https://nodejs.org".to_string(),
-        true,
     )?;
     let chrome_path = run_detect_opt(
         &mut term,
@@ -422,38 +372,29 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
                 .map(|p| p.display().to_string())
         },
         || "not found in the usual install locations — install Google Chrome".to_string(),
-        true,
     )?;
 
-    let mut cli_harnesses = Vec::new();
-    for (h, label) in &cli_rows {
-        let name = h.to_string();
-        let version = run_detect_opt(
+    let harness_status = if is_sdk_harness(harness) {
+        let env_var = api_key_env_var(harness);
+        run_detect_opt(
             &mut term,
             &mut rows,
             &log,
-            label,
-            || detect_harness_cli(*h),
-            || format!("`{name}` not found on PATH — install and authenticate it first"),
-            *h == harness,
-        )?;
-        cli_harnesses.push((name, version));
-    }
-
-    let mut sdk_api_keys = Vec::new();
-    for (h, label) in &sdk_key_rows {
-        let env_var = api_key_env_var(*h);
-        let present = run_detect_opt(
-            &mut term,
-            &mut rows,
-            &log,
-            label,
-            || api_key_present(*h).then(|| "set".to_string()),
+            &harness_label,
+            || api_key_present(harness).then(|| "set".to_string()),
             || format!("{env_var} not set — export it in your shell before running"),
-            *h == harness,
-        )?;
-        sdk_api_keys.push((h.to_string(), present.is_some()));
-    }
+        )?
+    } else {
+        let name = harness.to_string();
+        run_detect_opt(
+            &mut term,
+            &mut rows,
+            &log,
+            &harness_label,
+            || detect_harness_cli(harness),
+            || format!("`{name}` not found on PATH — install and authenticate it first"),
+        )?
+    };
 
     let block_server_deps = run_detect_bool(
         &mut term,
@@ -482,8 +423,8 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
     let fresh = Snapshot {
         node_version,
         chrome_path,
-        cli_harnesses,
-        sdk_api_keys,
+        harness: Some(harness.to_string()),
+        harness_status,
         block_server_deps,
         sdk_deps,
         chromium_installed,
@@ -526,10 +467,6 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
         )?;
     }
 
-    // `blocking` alone, not `Status::Failed` — a Failed row can be an
-    // unrelated harness the user never picked (e.g. codex not installed
-    // while claude is selected), which must never block getting past this
-    // screen. Every row that should block already has `blocking` set.
     let blocked: Vec<&Row> = rows.iter().filter(|r| r.blocking).collect();
     let final_snapshot = detect(harness);
     if blocked.is_empty() {
@@ -554,9 +491,6 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
     }
 }
 
-/// Only ever called for autoqa's own bundled dep dirs (block-server,
-/// claude-sdk, gemini-sdk) — never the user's `playwright-tests/` project,
-/// which has its own separate install in review_server.rs.
 fn npm_install_cmd(dir: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new("npm");
     cmd.args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
@@ -632,9 +566,9 @@ fn run_install(
             Status::Failed
         };
         // These three rows (block-server/sdk deps, Playwright chromium) are
-        // always-needed, not per-harness alternatives — unlike the
-        // per-harness CLI/API-key checks, a failed install here always
-        // blocks, regardless of which harness is selected.
+        // always-needed, not per-harness alternatives — unlike the selected
+        // harness's own CLI/API-key check, a failed install here always
+        // blocks.
         row.blocking = !status.success();
         if !status.success() {
             row.detail = format!("exited with {status}");
@@ -724,14 +658,8 @@ mod tests {
         Snapshot {
             node_version: Some("v20.0.0".to_string()),
             chrome_path: Some("/Applications/Google Chrome.app".to_string()),
-            cli_harnesses: vec![
-                ("claude".to_string(), Some("1.0.0".to_string())),
-                ("codex".to_string(), None),
-            ],
-            sdk_api_keys: vec![
-                ("claude-sdk".to_string(), true),
-                ("gemini-sdk".to_string(), false),
-            ],
+            harness: Some("claude".to_string()),
+            harness_status: Some("1.0.0".to_string()),
             block_server_deps: true,
             sdk_deps: true,
             chromium_installed: true,
@@ -739,36 +667,28 @@ mod tests {
     }
 
     #[test]
-    fn all_ok_true_when_selected_cli_harness_is_present() {
-        assert!(all_ok(&base_snapshot(), Harness::Claude));
+    fn all_ok_true_when_everything_present() {
+        assert!(all_ok(&base_snapshot()));
     }
 
     #[test]
-    fn all_ok_false_when_selected_cli_harness_is_missing() {
-        assert!(!all_ok(&base_snapshot(), Harness::Codex));
-    }
-
-    #[test]
-    fn all_ok_ignores_other_harnesses_missing_or_unauthenticated() {
-        // codex CLI missing and gemini-sdk key unset, but claude is selected
-        // and present — neither unrelated harness should block.
-        assert!(all_ok(&base_snapshot(), Harness::Claude));
-    }
-
-    #[test]
-    fn all_ok_true_when_selected_sdk_harness_has_api_key() {
-        assert!(all_ok(&base_snapshot(), Harness::ClaudeSdk));
-    }
-
-    #[test]
-    fn all_ok_false_when_selected_sdk_harness_has_no_api_key() {
-        assert!(!all_ok(&base_snapshot(), Harness::GeminiSdk));
+    fn all_ok_false_when_harness_status_missing() {
+        let mut s = base_snapshot();
+        s.harness_status = None;
+        assert!(!all_ok(&s));
     }
 
     #[test]
     fn all_ok_false_when_a_universal_check_fails() {
         let mut s = base_snapshot();
         s.chrome_path = None;
-        assert!(!all_ok(&s, Harness::Claude));
+        assert!(!all_ok(&s));
+    }
+
+    #[test]
+    fn all_ok_false_when_deps_not_installed() {
+        let mut s = base_snapshot();
+        s.block_server_deps = false;
+        assert!(!all_ok(&s));
     }
 }
