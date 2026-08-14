@@ -50,7 +50,8 @@ A reusable `.github/actions/setup` composite action installs the `autoqa`
 binary from GitHub Releases — no Homebrew tap/trust dance — and `--headless`
 / `--no-tui` swap out the interactive Chrome window and ratatui live pane for
 CI-friendly equivalents. See [docs/CI.md](docs/CI.md) for the full setup,
-including a working reference workflow.
+including a working [reference workflow](https://github.com/MerzoukeMansouri/auto-qa/actions/workflows/demo_run.yml)
+you can run yourself to test it.
 
 ## Documentation
 
