@@ -44,6 +44,14 @@ autoqa run --harness opencode --query "go to https://demo.playwright.dev/todomvc
 autoqa review    # turn the recorded session into a Playwright test
 ```
 
+## CI
+
+A reusable `.github/actions/setup` composite action installs the `autoqa`
+binary from GitHub Releases — no Homebrew tap/trust dance — and `--headless`
+/ `--no-tui` swap out the interactive Chrome window and ratatui live pane for
+CI-friendly equivalents. See [docs/CI.md](docs/CI.md) for the full setup,
+including a working reference workflow.
+
 ## Documentation
 
 - [Install](docs/INSTALL.md) — Homebrew, manual binary, dependencies, troubleshooting
@@ -55,4 +63,5 @@ autoqa review    # turn the recorded session into a Playwright test
   - [Reusable blocks](docs/USAGE.md#reusable-blocks)
   - [Doctor](docs/USAGE.md#doctor)
 - [Review & codegen](docs/REVIEW.md) — turning a recorded session into a Playwright test
+- [CI](docs/CI.md) — the setup action, `--headless`/`--no-tui`, and persisting the generated test
 - [Implementation notes](docs/IMPLEMENTATION.md) — selector strategy, session parsing, harness-specific quirks
