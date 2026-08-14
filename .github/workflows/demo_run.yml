@@ -27,3 +27,11 @@ jobs:
             --headless \
             --no-verification \
             --no-tui
+
+      - run: autoqa codegen --out playwright-tests/autoqa-generated.spec.ts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: autoqa-generated-test
+          path: playwright-tests/autoqa-generated.spec.ts
+          retention-days: 7
