@@ -64,3 +64,14 @@ off the ephemeral runner:
 working, `workflow_dispatch`-triggered example wiring all of the above
 together end to end (setup action → `autoqa run` → `autoqa codegen` →
 artifact upload) against a public demo site.
+
+To launch it yourself:
+
+- **GitHub UI**: Actions tab → "Demo run" → "Run workflow" → optionally
+  override the `query` input → Run.
+- **`gh` CLI**:
+  ```
+  gh workflow run demo_run.yml --repo MerzoukeMansouri/auto-qa --ref main
+  gh run watch --repo MerzoukeMansouri/auto-qa
+  ```
+  Add `-f query="..."` to the first command to override the default query.
