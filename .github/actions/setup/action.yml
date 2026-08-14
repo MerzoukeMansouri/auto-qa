@@ -1,0 +1,64 @@
+name: Setup autoqa
+description: >-
+  Downloads the autoqa CLI binary from GitHub Releases and adds it to PATH.
+  Binary only — Chrome/Node/harness CLI are not installed by this action.
+inputs:
+  version:
+    description: 'autoqa release to install (e.g. "v0.3.0"). Defaults to latest.'
+    required: false
+    default: latest
+runs:
+  using: composite
+  steps:
+    - name: Install autoqa (Linux/macOS)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          macOS-ARM64) TARGET=aarch64-apple-darwin ;;
+          macOS-X64)   TARGET=x86_64-apple-darwin ;;
+          Linux-X64)   TARGET=x86_64-unknown-linux-gnu ;;
+          *) echo "unsupported: ${RUNNER_OS}-${RUNNER_ARCH}" >&2; exit 1 ;;
+        esac
+
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          API_URL="https://api.github.com/repos/MerzoukeMansouri/auto-qa/releases/latest"
+        else
+          API_URL="https://api.github.com/repos/MerzoukeMansouri/auto-qa/releases/tags/${{ inputs.version }}"
+        fi
+        URL=$(curl -fsSL "$API_URL" | grep -o "https://[^\"]*${TARGET}\.tar\.gz")
+        if [ -z "$URL" ]; then
+          echo "no release asset found for ${TARGET} at ${{ inputs.version }}" >&2
+          exit 1
+        fi
+
+        DEST="${RUNNER_TEMP}/autoqa-bin"
+        mkdir -p "$DEST"
+        curl -fsSL "$URL" | tar xz -C "$DEST" autoqa
+        echo "$DEST" >> "$GITHUB_PATH"
+
+    - name: Install autoqa (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        if ("${{ inputs.version }}" -eq "latest") {
+          $apiUrl = "https://api.github.com/repos/MerzoukeMansouri/auto-qa/releases/latest"
+        } else {
+          $apiUrl = "https://api.github.com/repos/MerzoukeMansouri/auto-qa/releases/tags/${{ inputs.version }}"
+        }
+        $release = Invoke-RestMethod -Uri $apiUrl
+        $asset = $release.assets | Where-Object { $_.name -like "*x86_64-pc-windows-msvc.tar.gz" }
+        if (-not $asset) {
+          Write-Error "no release asset found for windows at ${{ inputs.version }}"
+          exit 1
+        }
+
+        $dest = "$env:RUNNER_TEMP\autoqa-bin"
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "$env:TEMP\autoqa.tar.gz"
+        tar -xzf "$env:TEMP\autoqa.tar.gz" -C $dest autoqa.exe
+        Add-Content -Path $env:GITHUB_PATH -Value $dest
+
+    - name: Verify install
+      shell: bash
+      run: autoqa --version

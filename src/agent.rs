@@ -45,19 +45,24 @@ pub(crate) fn find_chrome_executable() -> anyhow::Result<std::path::PathBuf> {
 /// `ws://` CDP endpoint, parsed off Chrome's own stderr announcement
 /// ("DevTools listening on ws://..."). `--remote-debugging-port=0` picks a
 /// free port so concurrent `autoqa run` invocations never collide.
-async fn launch_chrome_with_cdp() -> anyhow::Result<(tokio::process::Child, String)> {
+async fn launch_chrome_with_cdp(headless: bool) -> anyhow::Result<(tokio::process::Child, String)> {
     let exe = find_chrome_executable()?;
     // A fresh profile dir per run (keyed by pid, not a fixed path) — matches
     // the isolation `playwright_mcp_spec`'s old `--isolated` flag used to
     // guarantee: no cookies/localStorage leaking from a prior `autoqa run`.
     let profile_dir = std::env::temp_dir().join(format!("autoqa-chrome-{}", std::process::id()));
-    let mut child = tokio::process::Command::new(exe)
-        .arg("--remote-debugging-port=0")
+    let mut cmd = tokio::process::Command::new(exe);
+    cmd.arg("--remote-debugging-port=0")
         .arg(format!("--user-data-dir={}", profile_dir.display()))
         .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
+        .arg("--no-default-browser-check");
+    if headless {
+        // --no-sandbox: Chrome's sandbox needs setuid helpers most CI
+        // containers don't have set up — without it headless Chrome just
+        // fails to start under the root/container user CI runs as.
+        cmd.arg("--headless=new").arg("--no-sandbox");
+    }
+    let mut child = cmd.stderr(std::process::Stdio::piped()).spawn()?;
 
     let stderr = child.stderr.take().expect("stderr was piped");
     let mut lines = BufReader::new(stderr).lines();
@@ -239,6 +244,7 @@ pub async fn cmd_run(
     query: &str,
     locale: &str,
     model: Option<&str>,
+    headless: bool,
 ) -> anyhow::Result<()> {
     // Fresh per run — a stale log from a prior run would otherwise get
     // merged into this run's session (see `state::read_run_block_log`).
@@ -266,7 +272,7 @@ pub async fn cmd_run(
     // starts — see `state::max_pw_session_dir_name`.
     let pw_session_baseline = state::max_pw_session_dir_name().unwrap_or_default();
 
-    let (mut chrome, cdp_endpoint) = launch_chrome_with_cdp().await?;
+    let (mut chrome, cdp_endpoint) = launch_chrome_with_cdp(headless).await?;
     let run_result = run_harness(
         harness,
         &query,

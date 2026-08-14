@@ -42,6 +42,10 @@ pub enum Commands {
         /// --recheck if both are somehow given.
         #[arg(long)]
         no_verification: bool,
+        /// Run Chrome headless (`--headless=new`), with `--no-sandbox` added
+        /// automatically — for CI runners with no display.
+        #[arg(long)]
+        headless: bool,
     },
     /// Generate a Playwright .spec.ts from the latest `autoqa run` session.
     Codegen {

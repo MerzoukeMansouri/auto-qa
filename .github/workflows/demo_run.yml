@@ -1,0 +1,28 @@
+name: Demo run
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: 'Query passed to `autoqa run --query`'
+        required: false
+        default: >-
+          https://demo.playwright.dev/todomvc/ verifie qu'on peut ajouter des
+          action, changer tout leur status, et en supprimer
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - run: |
+          autoqa run \
+            --query "${{ inputs.query }}" \
+            --harness claude-sdk \
+            --headless \
+            --no-verification
