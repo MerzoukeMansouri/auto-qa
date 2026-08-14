@@ -67,8 +67,8 @@ artifact upload) against a public demo site.
 
 To launch it yourself:
 
-- **GitHub UI**: Actions tab → "Demo run" → "Run workflow" → optionally
-  override the `query` input → Run.
+- **GitHub UI**: [Actions → Demo run](https://github.com/MerzoukeMansouri/auto-qa/actions/workflows/demo_run.yml)
+  → "Run workflow" → optionally override the `query` input → Run.
 - **`gh` CLI**:
   ```
   gh workflow run demo_run.yml --repo MerzoukeMansouri/auto-qa --ref main
