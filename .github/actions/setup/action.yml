@@ -61,4 +61,4 @@ runs:
 
     - name: Verify install
       shell: bash
-      run: autoqa --version
+      run: autoqa --help
