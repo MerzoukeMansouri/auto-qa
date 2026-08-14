@@ -46,6 +46,12 @@ pub enum Commands {
         /// automatically — for CI runners with no display.
         #[arg(long)]
         headless: bool,
+        /// Stream plain log lines to stdout instead of the ratatui live
+        /// pane, and skip the pre-run block picker — for CI runners with no
+        /// controlling terminal (the ratatui pane needs one and fails with
+        /// ENXIO otherwise).
+        #[arg(long)]
+        no_tui: bool,
     },
     /// Generate a Playwright .spec.ts from the latest `autoqa run` session.
     Codegen {

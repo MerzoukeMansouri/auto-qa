@@ -25,4 +25,5 @@ jobs:
             --query "${{ inputs.query }}" \
             --harness claude-sdk \
             --headless \
-            --no-verification
+            --no-verification \
+            --no-tui

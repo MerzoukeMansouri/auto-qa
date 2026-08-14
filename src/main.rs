@@ -50,13 +50,14 @@ async fn main() -> anyhow::Result<()> {
             recheck,
             no_verification,
             headless,
+            no_tui,
         } => {
             let h = resolve_harness(harness)?;
             if !no_verification {
                 doctor::ensure(h, recheck)?;
             }
             let model = resolve_model(h, model);
-            agent::cmd_run(h, &query, &locale, model.as_deref(), headless).await
+            agent::cmd_run(h, &query, &locale, model.as_deref(), headless, no_tui).await
         }
         Commands::Codegen { out } => commands::cmd_codegen(&out).await,
         Commands::Review {

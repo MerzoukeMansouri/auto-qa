@@ -245,6 +245,7 @@ pub async fn cmd_run(
     locale: &str,
     model: Option<&str>,
     headless: bool,
+    no_tui: bool,
 ) -> anyhow::Result<()> {
     // Fresh per run — a stale log from a prior run would otherwise get
     // merged into this run's session (see `state::read_run_block_log`).
@@ -252,9 +253,15 @@ pub async fn cmd_run(
 
     // Pre-run TUI: pick which saved blocks to replay, and in what order,
     // before the agent starts — not a mid-run pause, a plan built up front.
-    let available_blocks = state::list_blocks().unwrap_or_default();
-    let params = state::read_params();
-    let plan = tui::pick_blocks(&available_blocks, &params)?;
+    // --no-tui (no controlling terminal, e.g. CI) skips the picker outright:
+    // there's no one to pick, so the run proceeds with no blocks chained in.
+    let plan = if no_tui {
+        Vec::new()
+    } else {
+        let available_blocks = state::list_blocks().unwrap_or_default();
+        let params = state::read_params();
+        tui::pick_blocks(&available_blocks, &params)?
+    };
 
     // Persisted so `autoqa codegen`/`autoqa review` (run later, in a separate
     // invocation) can title the generated test after the actual task
@@ -280,6 +287,7 @@ pub async fn cmd_run(
         &cdp_endpoint,
         &pw_session_baseline,
         model,
+        no_tui,
     )
     .await;
 
@@ -296,6 +304,7 @@ async fn run_harness(
     cdp_endpoint: &str,
     pw_session_baseline: &str,
     model: Option<&str>,
+    no_tui: bool,
 ) -> anyhow::Result<()> {
     let mcp_specs = vec![
         playwright_mcp_spec(locale, cdp_endpoint)?,
@@ -310,7 +319,8 @@ async fn run_harness(
     // harness's (jq-filtered, or raw) output into a live-progress pane —
     // replaces the old direct-to-stdout print loop.
     let log_filter = harness.log_filter();
-    let status = tokio::task::spawn_blocking(move || tui::run_live(child, log_filter)).await??;
+    let status =
+        tokio::task::spawn_blocking(move || tui::run_live(child, log_filter, no_tui)).await??;
 
     if !status.success() {
         anyhow::bail!("harness exited with status {status}");

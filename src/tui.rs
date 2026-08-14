@@ -578,6 +578,7 @@ pub fn render_plan_prefix(plan: &[PlannedBlock]) -> String {
 pub fn run_live(
     mut child: std::process::Child,
     log_filter: Option<&'static str>,
+    no_tui: bool,
 ) -> anyhow::Result<std::process::ExitStatus> {
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let child_stdout = child.stdout.take().expect("stdout was piped");
@@ -654,6 +655,27 @@ pub fn run_live(
             }
         }
         Ok(())
+    }
+
+    // No real terminal to draw into (CI runners have none — crossterm's
+    // enable_raw_mode fails with ENXIO) — print each line as it arrives
+    // instead of entering the ratatui alternate screen.
+    if no_tui {
+        let status = loop {
+            while let Ok(line) = rx.try_recv() {
+                println!("{line}");
+            }
+            if let Ok(Some(status)) = child.try_wait() {
+                break status;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        while let Ok(line) = rx.try_recv() {
+            println!("{line}");
+        }
+        let _ = reader.join();
+        let _ = stderr_reader.join();
+        return Ok(status);
     }
 
     let mut term = enter_tui()?;
