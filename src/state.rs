@@ -11,8 +11,9 @@ use std::path::PathBuf;
 pub const NPM_PUBLIC_REGISTRY: &str = "https://registry.npmjs.org/";
 
 pub fn runtime_dir() -> PathBuf {
-    let home = std::env::var("HOME").expect("HOME not set");
-    PathBuf::from(home).join(".autoqa")
+    dirs::home_dir()
+        .expect("could not determine home directory")
+        .join(".autoqa")
 }
 
 pub fn actions_path() -> PathBuf {

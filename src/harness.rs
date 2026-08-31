@@ -124,8 +124,8 @@ fn scratch_dir(name: &str) -> PathBuf {
 /// at a scratch dir, copy the real login (ChatGPT or API key) in — otherwise
 /// codex sees no auth and fails even when the user is logged in.
 fn copy_codex_auth(dir: &std::path::Path) {
-    if let Ok(home) = std::env::var("HOME") {
-        let auth = PathBuf::from(home).join(".codex").join("auth.json");
+    if let Some(home) = dirs::home_dir() {
+        let auth = home.join(".codex").join("auth.json");
         let _ = std::fs::copy(auth, dir.join("auth.json"));
     }
 }
