@@ -157,9 +157,19 @@ pub(crate) fn write_sdk_files(harness: Harness) -> anyhow::Result<PathBuf> {
     };
     // `harness.to_string()` doubles as the runtime dir name — doctor.rs's
     // `sdk_deps_ok` checks that same dir.
-    let dir = state::runtime_dir().join(harness.to_string());
+    let runtime_dir = state::runtime_dir();
+    let dir = runtime_dir.join(harness.to_string());
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join("package.json"), package_json)?;
+    // The script imports shared helpers from "../sdk-common.mjs", matching
+    // this repo's node/<harness>/index.mjs -> node/sdk-common.mjs layout —
+    // each harness's runtime dir sits directly under `runtime_dir`, so the
+    // shared file (no non-builtin imports of its own, so no node_modules of
+    // its own needed) is written there once and shared by all three.
+    std::fs::write(
+        runtime_dir.join("sdk-common.mjs"),
+        include_str!("../node/sdk-common.mjs"),
+    )?;
     let script_path = dir.join("index.mjs");
     std::fs::write(&script_path, script)?;
     Ok(script_path)
@@ -179,17 +189,18 @@ fn ensure_sdk_script(harness: Harness) -> anyhow::Result<PathBuf> {
     Ok(script_path)
 }
 
+fn env_map(env: &[(&'static str, String)]) -> serde_json::Map<String, serde_json::Value> {
+    env.iter()
+        .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.clone())))
+        .collect()
+}
+
 fn mcp_config_json(servers: &[McpServerSpec]) -> serde_json::Value {
     let mut mcp_servers = serde_json::Map::new();
     for mcp in servers {
         let mut entry = serde_json::json!({ "command": mcp.command, "args": mcp.args });
         if !mcp.env.is_empty() {
-            let env: serde_json::Map<_, _> = mcp
-                .env
-                .iter()
-                .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.clone())))
-                .collect();
-            entry["env"] = serde_json::Value::Object(env);
+            entry["env"] = serde_json::Value::Object(env_map(&mcp.env));
         }
         mcp_servers.insert(mcp.name.to_string(), entry);
     }
@@ -364,12 +375,7 @@ impl Harness {
                         "enabled": true
                     });
                     if !m.env.is_empty() {
-                        let env: serde_json::Map<_, _> = m
-                            .env
-                            .iter()
-                            .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.clone())))
-                            .collect();
-                        entry["environment"] = serde_json::Value::Object(env);
+                        entry["environment"] = serde_json::Value::Object(env_map(&m.env));
                     }
                     mcp_servers.insert(m.name.to_string(), entry);
                 }
@@ -861,3 +867,4 @@ mod tests {
         assert!(Harness::Gemini.log_filter().is_some());
     }
 }
+

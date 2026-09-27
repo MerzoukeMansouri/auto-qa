@@ -8,70 +8,12 @@ import { GoogleGenAI } from "@google/genai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import fs from "node:fs";
+import { connectMcpServers, parseArgs, truncate } from "../sdk-common.mjs";
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
 
-function parseArgs(argv) {
-  const args = {
-    query: null,
-    systemPromptFile: null,
-    mcpConfigFile: null,
-    maxIterations: 50,
-    raw: false,
-    model: DEFAULT_MODEL,
-  };
-  const rest = [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--system-prompt-file") args.systemPromptFile = argv[++i];
-    else if (a === "--mcp-config-file") args.mcpConfigFile = argv[++i];
-    else if (a === "--max-iterations") args.maxIterations = parseInt(argv[++i], 10);
-    else if (a === "--raw") args.raw = true;
-    else if (a === "--model") args.model = argv[++i];
-    else rest.push(a);
-  }
-  args.query = rest[0];
-  return args;
-}
-
-function truncate(v, n = 300) {
-  const s = typeof v === "string" ? v : JSON.stringify(v);
-  return s.length > n ? s.slice(0, n) + "…" : s;
-}
-
-// Tool names are namespaced mcp__<server>__<tool> to match the mcp__ prefix
-// convention the shared system prompt already writes tool references in
-// (see SYSTEM_PROMPT in src/agent.rs).
-async function connectMcpServers(mcpConfigFile) {
-  if (!mcpConfigFile || !fs.existsSync(mcpConfigFile)) {
-    return { clients: [], functionDeclarations: [], toolToClient: new Map() };
-  }
-  const config = JSON.parse(fs.readFileSync(mcpConfigFile, "utf8"));
-  const servers = config.mcpServers ?? {};
-  const clients = [];
-  const functionDeclarations = [];
-  const toolToClient = new Map();
-  for (const [name, spec] of Object.entries(servers)) {
-    const transport = new StdioClientTransport({ command: spec.command, args: spec.args ?? [] });
-    const client = new Client({ name: `autoqa-gemini-sdk-${name}`, version: "1.0.0" });
-    await client.connect(transport);
-    const { tools } = await client.listTools();
-    for (const t of tools) {
-      const qualifiedName = `mcp__${name}__${t.name}`;
-      functionDeclarations.push({
-        name: qualifiedName,
-        description: t.description ?? "",
-        parameters: t.inputSchema ?? { type: "object", properties: {} },
-      });
-      toolToClient.set(qualifiedName, { client, originalName: t.name });
-    }
-    clients.push(client);
-  }
-  return { clients, functionDeclarations, toolToClient };
-}
-
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(process.argv.slice(2), DEFAULT_MODEL);
   if (!args.query) {
     console.error("missing query argument");
     process.exit(1);
@@ -85,7 +27,12 @@ async function main() {
     ? fs.readFileSync(args.systemPromptFile, "utf8")
     : undefined;
 
-  const { clients, functionDeclarations, toolToClient } = await connectMcpServers(args.mcpConfigFile);
+  const { clients, tools: functionDeclarations, toolToClient } = await connectMcpServers(args.mcpConfigFile, {
+    Client,
+    StdioClientTransport,
+    clientNamePrefix: "autoqa-gemini-sdk-",
+    buildTool: (name, description, inputSchema) => ({ name, description, parameters: inputSchema }),
+  });
   const ai = new GoogleGenAI({ apiKey });
 
   const contents = [{ role: "user", parts: [{ text: args.query }] }];

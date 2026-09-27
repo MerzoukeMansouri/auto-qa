@@ -1,22 +1,15 @@
-import { useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { CodeInput } from "@/components/CodeInput"
 import type { Param } from "@/types"
 import { Trash2, Plus } from "lucide-react"
+import { useDebouncedSave } from "@/hooks/useDebouncedSave"
 
 export function ParamsView({ params, setParams }: { params: Param[]; setParams: (p: Param[]) => void }) {
-  const saveTimer = useRef<number | undefined>(undefined)
+  const { save: debouncedSave } = useDebouncedSave()
 
   function scheduleSave(next: Param[]) {
     setParams(next)
-    window.clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(() => {
-      fetch("/api/params", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(next),
-      })
-    }, 400)
+    debouncedSave("params", "/api/params", next)
   }
 
   function updateAt(i: number, next: Param) {

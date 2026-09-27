@@ -16,13 +16,17 @@ use std::time::Duration;
 /// Harness picker screen, used both for the first-run prompt (`resolve_harness`)
 /// and `autoqa config` with no `--harness`. `Esc`/`q` aborts (returns Err) —
 /// same convention as `pick_blocks`.
-pub fn pick_harness(
-    current: Option<crate::harness::Harness>,
-) -> anyhow::Result<crate::harness::Harness> {
+/// Generic arrow-key list picker shared by `pick_harness` and
+/// `pick_model_from_list` — same layout, event loop and cursor wraparound;
+/// only the item type, title and display label differ per caller.
+fn pick_from_list<T: Clone>(
+    title: &str,
+    items: &[T],
+    cursor0: usize,
+    label: impl Fn(&T) -> String,
+) -> anyhow::Result<T> {
     let mut term = enter_tui()?;
-    let mut cursor = current
-        .and_then(|c| crate::harness::ALL.iter().position(|h| *h == c))
-        .unwrap_or(0);
+    let mut cursor = cursor0;
 
     let result = loop {
         term.draw(|f| {
@@ -32,29 +36,20 @@ pub fn pick_harness(
                 .constraints([Constraint::Min(3), Constraint::Length(3)])
                 .split(area);
 
-            let items: Vec<ListItem> = crate::harness::ALL
+            let list_items: Vec<ListItem> = items
                 .iter()
                 .enumerate()
-                .map(|(i, h)| {
+                .map(|(i, item)| {
                     let style = if i == cursor {
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else {
                         Style::default()
                     };
-                    let marker = if current == Some(*h) {
-                        " (current)"
-                    } else {
-                        ""
-                    };
-                    ListItem::new(format!("{h}{marker}")).style(style)
+                    ListItem::new(label(item)).style(style)
                 })
                 .collect();
             f.render_widget(
-                List::new(items).block(
-                    UiBlock::default()
-                        .borders(Borders::ALL)
-                        .title("Pick a harness"),
-                ),
+                List::new(list_items).block(UiBlock::default().borders(Borders::ALL).title(title)),
                 rows[0],
             );
 
@@ -77,13 +72,11 @@ pub fn pick_harness(
             continue;
         }
         match key.code {
-            KeyCode::Up => {
-                cursor = (cursor + crate::harness::ALL.len() - 1) % crate::harness::ALL.len()
-            }
-            KeyCode::Down => cursor = (cursor + 1) % crate::harness::ALL.len(),
-            KeyCode::Enter => break Ok(crate::harness::ALL[cursor]),
+            KeyCode::Up => cursor = (cursor + items.len() - 1) % items.len(),
+            KeyCode::Down => cursor = (cursor + 1) % items.len(),
+            KeyCode::Enter => break Ok(items[cursor].clone()),
             KeyCode::Esc | KeyCode::Char('q') => {
-                break Err(anyhow::anyhow!("harness selection cancelled"))
+                break Err(anyhow::anyhow!("selection cancelled"))
             }
             _ => {}
         }
@@ -91,6 +84,22 @@ pub fn pick_harness(
 
     leave_tui()?;
     result
+}
+
+/// Harness picker screen, used both for the first-run prompt (`resolve_harness`)
+/// and `autoqa config` with no `--harness`. `Esc`/`q` aborts (returns Err) —
+/// same convention as `pick_blocks`.
+pub fn pick_harness(
+    current: Option<crate::harness::Harness>,
+) -> anyhow::Result<crate::harness::Harness> {
+    let cursor = current
+        .and_then(|c| crate::harness::ALL.iter().position(|h| *h == c))
+        .unwrap_or(0);
+    pick_from_list("Pick a harness", crate::harness::ALL, cursor, |h| {
+        let marker = if current == Some(*h) { " (current)" } else { "" };
+        format!("{h}{marker}")
+    })
+    .map_err(|_| anyhow::anyhow!("harness selection cancelled"))
 }
 
 /// Model picker for `autoqa config`. Dispatches per harness: an arrow-key
@@ -109,77 +118,20 @@ pub fn pick_model(
 }
 
 fn pick_model_from_list(choices: &[&str], current: Option<String>) -> anyhow::Result<String> {
-    let mut term = enter_tui()?;
-    let mut cursor = current
+    let cursor = current
         .as_deref()
         .and_then(|c| choices.iter().position(|m| *m == c))
         .unwrap_or(0);
-
-    let result = loop {
-        term.draw(|f| {
-            let area = f.area();
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(3), Constraint::Length(3)])
-                .split(area);
-
-            let items: Vec<ListItem> = choices
-                .iter()
-                .enumerate()
-                .map(|(i, m)| {
-                    let style = if i == cursor {
-                        Style::default().add_modifier(Modifier::REVERSED)
-                    } else {
-                        Style::default()
-                    };
-                    let marker = if current.as_deref() == Some(*m) {
-                        " (current)"
-                    } else {
-                        ""
-                    };
-                    ListItem::new(format!("{m}{marker}")).style(style)
-                })
-                .collect();
-            f.render_widget(
-                List::new(items).block(
-                    UiBlock::default()
-                        .borders(Borders::ALL)
-                        .title("Pick a model"),
-                ),
-                rows[0],
-            );
-
-            let help = "↑/↓: move  Enter: select  q/Esc: cancel";
-            f.render_widget(
-                Paragraph::new(help)
-                    .wrap(Wrap { trim: true })
-                    .block(UiBlock::default().borders(Borders::ALL)),
-                rows[1],
-            );
-        })?;
-
-        if !event::poll(Duration::from_millis(200))? {
-            continue;
-        }
-        let Event::Key(key) = event::read()? else {
-            continue;
+    pick_from_list("Pick a model", choices, cursor, |m| {
+        let marker = if current.as_deref() == Some(*m) {
+            " (current)"
+        } else {
+            ""
         };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
-        match key.code {
-            KeyCode::Up => cursor = (cursor + choices.len() - 1) % choices.len(),
-            KeyCode::Down => cursor = (cursor + 1) % choices.len(),
-            KeyCode::Enter => break Ok(choices[cursor].to_string()),
-            KeyCode::Esc | KeyCode::Char('q') => {
-                break Err(anyhow::anyhow!("model selection cancelled"))
-            }
-            _ => {}
-        }
-    };
-
-    leave_tui()?;
-    result
+        format!("{m}{marker}")
+    })
+    .map(|m| m.to_string())
+    .map_err(|_| anyhow::anyhow!("model selection cancelled"))
 }
 
 /// Single-line free-text input screen — Enter submits (empty input keeps
@@ -263,7 +215,8 @@ fn placeholders_in(block: &Block) -> Vec<String> {
     names
 }
 
-fn enter_tui() -> anyhow::Result<Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>> {
+pub(crate) fn enter_tui(
+) -> anyhow::Result<Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>> {
     enable_raw_mode()?;
     std::io::stdout().execute(EnterAlternateScreen)?;
     Ok(Terminal::new(ratatui::backend::CrosstermBackend::new(
@@ -271,7 +224,7 @@ fn enter_tui() -> anyhow::Result<Terminal<ratatui::backend::CrosstermBackend<std
     ))?)
 }
 
-fn leave_tui() -> anyhow::Result<()> {
+pub(crate) fn leave_tui() -> anyhow::Result<()> {
     disable_raw_mode()?;
     std::io::stdout().execute(LeaveAlternateScreen)?;
     Ok(())
@@ -369,7 +322,7 @@ pub fn pick_blocks(
             );
 
             if let Some(edit) = &editing {
-                render_binding_popup(f, area, &plan[edit.plan_index], edit, params);
+                render_binding_popup(f, area, &plan[edit.plan_index], edit);
             }
         })?;
 
@@ -495,13 +448,7 @@ fn placeholder_count(available: &[(String, Block)], slug: &str) -> usize {
         .unwrap_or(0)
 }
 
-fn render_binding_popup(
-    f: &mut ratatui::Frame,
-    area: Rect,
-    plan_item: &PlannedBlock,
-    edit: &EditingBindings,
-    params: &[Param],
-) {
+fn render_binding_popup(f: &mut ratatui::Frame, area: Rect, plan_item: &PlannedBlock, edit: &EditingBindings) {
     let popup = Rect {
         x: area.width / 6,
         y: area.height / 3,
@@ -535,7 +482,6 @@ fn render_binding_popup(
         Paragraph::new(lines).block(UiBlock::default().borders(Borders::ALL).title(title)),
         popup,
     );
-    let _ = params; // param names shown via the bound-value lookup above
 }
 
 /// Text prepended to the run query, instructing the agent to replay the

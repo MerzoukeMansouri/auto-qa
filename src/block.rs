@@ -1,6 +1,13 @@
-use crate::action_entry::ActionEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct ActionEntry {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub action: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub assertion: String,
+}
 
 /// A named, reusable sequence of steps — authored once in the review UI,
 /// then referenced (live, not copied) from any test's step list, and

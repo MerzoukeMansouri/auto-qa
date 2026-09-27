@@ -1,8 +1,6 @@
-mod action_entry;
 mod agent;
 mod block;
 mod cli;
-mod commands;
 mod doctor;
 mod harness;
 mod playwright_codegen;
@@ -59,7 +57,23 @@ async fn main() -> anyhow::Result<()> {
             let model = resolve_model(h, model);
             agent::cmd_run(h, &query, &locale, model.as_deref(), headless, no_tui).await
         }
-        Commands::Codegen { out } => commands::cmd_codegen(&out).await,
+        // Pure file transform, no browser session needed — reads actions.json
+        // (importing the latest `autoqa run` MCP session into it first, unless
+        // it was already hand-edited more recently via `autoqa review`),
+        // writes a Playwright .spec.ts. Kept separate from `autoqa review`
+        // for scripting/CI use.
+        Commands::Codegen { out } => {
+            state::sync_actions_from_latest_mcp_session()?;
+            let title = state::latest_query()
+                .unwrap_or_else(|| "generated from autoqa session".to_string());
+            let ts = playwright_codegen::generate(&state::read_actions(), &title)?;
+            if let Some(parent) = std::path::Path::new(&out).parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&out, ts)?;
+            println!("wrote {out}");
+            Ok(())
+        }
         Commands::Review {
             port,
             harness,

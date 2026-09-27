@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { Sidebar, type View } from "@/components/Sidebar"
 import { StepsView } from "@/components/StepsView"
 import { BlocksPalette } from "@/components/BlocksPalette"
@@ -7,6 +7,7 @@ import { ParamsView } from "@/components/ParamsView"
 import type { TestStep, Block, Param, Test } from "@/types"
 import { emptyStep } from "@/types"
 import { reorder } from "@/lib/dnd"
+import { useDebouncedSave } from "@/hooks/useDebouncedSave"
 
 export default function App() {
   const [entries, setEntries] = useState<TestStep[]>([])
@@ -21,7 +22,7 @@ export default function App() {
   const [chatBusy, setChatBusy] = useState(false)
   const [view, setView] = useState<View>("tests")
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const saveTimer = useRef<number | undefined>(undefined)
+  const { save: debouncedSave, cancel: cancelSave } = useDebouncedSave()
 
   useEffect(() => {
     fetch("/api/actions")
@@ -56,14 +57,7 @@ export default function App() {
 
   function scheduleSave(next: TestStep[]) {
     setEntries(next)
-    window.clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(() => {
-      fetch("/api/actions", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(next),
-      })
-    }, 400)
+    debouncedSave("actions", "/api/actions", next)
   }
 
   function updateAt(i: number, next: TestStep) {
@@ -129,7 +123,7 @@ export default function App() {
   }
 
   async function saveNow(next?: TestStep[]) {
-    window.clearTimeout(saveTimer.current)
+    cancelSave("actions")
     const body = next ?? entries
     await fetch("/api/actions", {
       method: "PUT",

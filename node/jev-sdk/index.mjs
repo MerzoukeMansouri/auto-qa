@@ -14,6 +14,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import { parseArgs, truncate } from "../sdk-common.mjs";
 
 const DEFAULT_MODEL = "typesafe-ai/jev";
 const TEXT_MODEL = process.env.JEV_TEXT_MODEL?.trim() || "google/gemini-2.5-flash-lite";
@@ -62,27 +63,6 @@ const VERIFY_QUESTION = "Which visible element best proves that lastAction achie
 const TARGET_RULES =
   "Choose the best offered element for this operation, using the task, current field values, and recent actions. " +
   "Do not choose a field that already contains the requested value.";
-
-function parseArgs(argv) {
-  const args = { query: null, systemPromptFile: null, mcpConfigFile: null, maxIterations: 50, raw: false, model: DEFAULT_MODEL };
-  const rest = [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--system-prompt-file") args.systemPromptFile = argv[++i];
-    else if (a === "--mcp-config-file") args.mcpConfigFile = argv[++i];
-    else if (a === "--max-iterations") args.maxIterations = parseInt(argv[++i], 10);
-    else if (a === "--raw") args.raw = true;
-    else if (a === "--model") args.model = argv[++i];
-    else rest.push(a);
-  }
-  args.query = rest[0];
-  return args;
-}
-
-function truncate(v, n = 300) {
-  const s = typeof v === "string" ? v : JSON.stringify(v);
-  return s.length > n ? s.slice(0, n) + "…" : s;
-}
 
 // One line of Playwright MCP's aria snapshot (with boxes: true), e.g.
 //   - textbox "What needs to be done?" [active] [ref=e8] [box=0,120,550,65]: typed value
@@ -227,7 +207,7 @@ async function connectPlaywright(mcpConfigFile) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(process.argv.slice(2), DEFAULT_MODEL);
   if (!args.query) {
     console.error("missing query argument");
     process.exit(1);

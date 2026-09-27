@@ -181,13 +181,14 @@ pub fn tests_dir() -> PathBuf {
     runtime_dir().join("tests")
 }
 
-pub fn list_tests() -> anyhow::Result<Vec<(String, Test)>> {
-    let dir = tests_dir();
+/// Shared shape behind `{list,read,write,delete}_{test,block}`: each kind is
+/// just JSON files named `<slug>.json` in its own directory.
+fn list_json<T: serde::de::DeserializeOwned>(dir: &std::path::Path) -> anyhow::Result<Vec<(String, T)>> {
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
-    let mut tests = Vec::new();
-    for entry in std::fs::read_dir(&dir)? {
+    let mut items = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
@@ -195,72 +196,60 @@ pub fn list_tests() -> anyhow::Result<Vec<(String, Test)>> {
         let Some(slug) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let test: Test = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
-        tests.push((slug.to_string(), test));
+        let item: T = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+        items.push((slug.to_string(), item));
     }
-    Ok(tests)
+    Ok(items)
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(dir: &std::path::Path, slug: &str, kind: &str) -> anyhow::Result<T> {
+    let path = dir.join(format!("{slug}.json"));
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|_| anyhow::anyhow!("{kind} '{slug}' not found at {}", path.display()))?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+fn write_json<T: serde::Serialize>(dir: &std::path::Path, slug: &str, item: &T) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(dir.join(format!("{slug}.json")), serde_json::to_string_pretty(item)?)?;
+    Ok(())
+}
+
+fn delete_json(dir: &std::path::Path, slug: &str) -> anyhow::Result<()> {
+    std::fs::remove_file(dir.join(format!("{slug}.json")))?;
+    Ok(())
+}
+
+pub fn list_tests() -> anyhow::Result<Vec<(String, Test)>> {
+    list_json(&tests_dir())
 }
 
 pub fn read_test(slug: &str) -> anyhow::Result<Test> {
-    let path = tests_dir().join(format!("{slug}.json"));
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|_| anyhow::anyhow!("test '{slug}' not found at {}", path.display()))?;
-    Ok(serde_json::from_str(&raw)?)
+    read_json(&tests_dir(), slug, "test")
 }
 
 pub fn write_test(slug: &str, test: &Test) -> anyhow::Result<()> {
-    std::fs::create_dir_all(tests_dir())?;
-    std::fs::write(
-        tests_dir().join(format!("{slug}.json")),
-        serde_json::to_string_pretty(test)?,
-    )?;
-    Ok(())
+    write_json(&tests_dir(), slug, test)
 }
 
 pub fn delete_test(slug: &str) -> anyhow::Result<()> {
-    std::fs::remove_file(tests_dir().join(format!("{slug}.json")))?;
-    Ok(())
+    delete_json(&tests_dir(), slug)
 }
 
 pub fn list_blocks() -> anyhow::Result<Vec<(String, Block)>> {
-    let dir = blocks_dir();
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut blocks = Vec::new();
-    for entry in std::fs::read_dir(&dir)? {
-        let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(slug) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let block: Block = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
-        blocks.push((slug.to_string(), block));
-    }
-    Ok(blocks)
+    list_json(&blocks_dir())
 }
 
 pub fn read_block(slug: &str) -> anyhow::Result<Block> {
-    let path = blocks_dir().join(format!("{slug}.json"));
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|_| anyhow::anyhow!("block '{slug}' not found at {}", path.display()))?;
-    Ok(serde_json::from_str(&raw)?)
+    read_json(&blocks_dir(), slug, "block")
 }
 
 pub fn write_block(slug: &str, block: &Block) -> anyhow::Result<()> {
-    std::fs::create_dir_all(blocks_dir())?;
-    std::fs::write(
-        blocks_dir().join(format!("{slug}.json")),
-        serde_json::to_string_pretty(block)?,
-    )?;
-    Ok(())
+    write_json(&blocks_dir(), slug, block)
 }
 
 pub fn delete_block(slug: &str) -> anyhow::Result<()> {
-    std::fs::remove_file(blocks_dir().join(format!("{slug}.json")))?;
-    Ok(())
+    delete_json(&blocks_dir(), slug)
 }
 
 pub fn read_params() -> Vec<Param> {

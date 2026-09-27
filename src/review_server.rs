@@ -50,11 +50,17 @@ async fn get_actions() -> Json<Vec<TestStep>> {
     Json(state::read_actions())
 }
 
-async fn put_actions(Json(entries): Json<Vec<TestStep>>) -> impl IntoResponse {
-    match state::write_actions(&entries) {
+/// Shared response shape for the six handlers that only ever report success
+/// as an empty 204 or failure as a 500 with the error text.
+fn no_content_or_500(r: anyhow::Result<()>) -> impl IntoResponse {
+    match r {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+async fn put_actions(Json(entries): Json<Vec<TestStep>>) -> impl IntoResponse {
+    no_content_or_500(state::write_actions(&entries))
 }
 
 async fn get_blocks() -> Json<Vec<(String, Block)>> {
@@ -62,17 +68,11 @@ async fn get_blocks() -> Json<Vec<(String, Block)>> {
 }
 
 async fn put_block(Path(slug): Path<String>, Json(block): Json<Block>) -> impl IntoResponse {
-    match state::write_block(&slug, &block) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    no_content_or_500(state::write_block(&slug, &block))
 }
 
 async fn delete_block(Path(slug): Path<String>) -> impl IntoResponse {
-    match state::delete_block(&slug) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    no_content_or_500(state::delete_block(&slug))
 }
 
 async fn get_tests() -> Json<Vec<(String, Test)>> {
@@ -105,17 +105,11 @@ async fn open_last_run() -> impl IntoResponse {
 }
 
 async fn put_test(Path(slug): Path<String>, Json(test): Json<Test>) -> impl IntoResponse {
-    match state::write_test(&slug, &test) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    no_content_or_500(state::write_test(&slug, &test))
 }
 
 async fn delete_test(Path(slug): Path<String>) -> impl IntoResponse {
-    match state::delete_test(&slug) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    no_content_or_500(state::delete_test(&slug))
 }
 
 async fn get_params() -> Json<Vec<Param>> {
@@ -123,10 +117,7 @@ async fn get_params() -> Json<Vec<Param>> {
 }
 
 async fn put_params(Json(entries): Json<Vec<Param>>) -> impl IntoResponse {
-    match state::write_params(&entries) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    no_content_or_500(state::write_params(&entries))
 }
 
 /// Bootstraps `~/.auto-qa/playwright-tests` on first use — a fresh

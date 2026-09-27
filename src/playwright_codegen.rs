@@ -1,4 +1,4 @@
-use crate::action_entry::ActionEntry;
+use crate::block::ActionEntry;
 use crate::block::TestStep;
 use crate::state;
 

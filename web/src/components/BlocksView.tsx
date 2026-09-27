@@ -1,9 +1,10 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { CodeInput } from "@/components/CodeInput"
 import type { Block } from "@/types"
 import { Trash2, Plus, GripVertical } from "lucide-react"
 import { DND_REORDER, gapForRow, reorder } from "@/lib/dnd"
+import { useDebouncedSave } from "@/hooks/useDebouncedSave"
 
 function slugify(name: string): string {
   return name
@@ -21,19 +22,12 @@ export function BlocksView({
   refreshBlocks: () => Promise<void>
   showToast: (text: string, variant: "info" | "pass" | "fail") => void
 }) {
-  const saveTimers = useRef<Record<string, number>>({})
+  const { save: debouncedSave } = useDebouncedSave()
   const [drag, setDrag] = useState<{ slug: string; index: number } | null>(null)
   const [overGap, setOverGap] = useState<{ slug: string; gap: number } | null>(null)
 
   function scheduleSave(slug: string, block: Block) {
-    window.clearTimeout(saveTimers.current[slug])
-    saveTimers.current[slug] = window.setTimeout(() => {
-      fetch(`/api/blocks/${slug}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(block),
-      }).then(refreshBlocks)
-    }, 400)
+    debouncedSave(slug, `/api/blocks/${slug}`, block, refreshBlocks)
   }
 
   async function deleteBlock(slug: string) {

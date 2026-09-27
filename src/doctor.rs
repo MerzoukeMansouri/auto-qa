@@ -1,9 +1,6 @@
+use crate::tui::{enter_tui, leave_tui};
 use crate::{harness::Harness, state};
 use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
-use crossterm::ExecutableCommand;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -221,20 +218,6 @@ fn playwright_chromium_installed() -> bool {
             .to_str()
             .is_some_and(|n| n.starts_with("chromium-"))
     })
-}
-
-fn enter_tui() -> anyhow::Result<Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>> {
-    enable_raw_mode()?;
-    std::io::stdout().execute(EnterAlternateScreen)?;
-    Ok(Terminal::new(ratatui::backend::CrosstermBackend::new(
-        std::io::stdout(),
-    ))?)
-}
-
-fn leave_tui() -> anyhow::Result<()> {
-    disable_raw_mode()?;
-    std::io::stdout().execute(LeaveAlternateScreen)?;
-    Ok(())
 }
 
 fn set_running(rows: &mut [Row], label: &str) {
