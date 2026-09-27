@@ -22,7 +22,10 @@ Anthropic/Gemini API directly, no CLI needed) — wired to
 session, and turns it into a real Playwright test. Reasoning/orchestration is
 delegated entirely to whichever harness you pick — this project has no agent
 loop of its own for the CLI harnesses, and no browser-automation code of its
-own either; Playwright MCP owns the browser.
+own either; Playwright MCP owns the browser. The one exception is `jev-sdk`,
+which drives Playwright MCP through TypeSafe's [Jev](https://docs.typesafe.ai/introduction)
+— a choice model, not a chat LLM — so autoqa owns that loop itself; see
+[Choosing a harness](docs/USAGE.md#choosing-a-harness) for how it works.
 
 ## Install
 
