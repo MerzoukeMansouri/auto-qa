@@ -75,9 +75,7 @@ fn pick_from_list<T: Clone>(
             KeyCode::Up => cursor = (cursor + items.len() - 1) % items.len(),
             KeyCode::Down => cursor = (cursor + 1) % items.len(),
             KeyCode::Enter => break Ok(items[cursor].clone()),
-            KeyCode::Esc | KeyCode::Char('q') => {
-                break Err(anyhow::anyhow!("selection cancelled"))
-            }
+            KeyCode::Esc | KeyCode::Char('q') => break Err(anyhow::anyhow!("selection cancelled")),
             _ => {}
         }
     };
@@ -96,7 +94,11 @@ pub fn pick_harness(
         .and_then(|c| crate::harness::ALL.iter().position(|h| *h == c))
         .unwrap_or(0);
     pick_from_list("Pick a harness", crate::harness::ALL, cursor, |h| {
-        let marker = if current == Some(*h) { " (current)" } else { "" };
+        let marker = if current == Some(*h) {
+            " (current)"
+        } else {
+            ""
+        };
         format!("{h}{marker}")
     })
     .map_err(|_| anyhow::anyhow!("harness selection cancelled"))
@@ -448,7 +450,12 @@ fn placeholder_count(available: &[(String, Block)], slug: &str) -> usize {
         .unwrap_or(0)
 }
 
-fn render_binding_popup(f: &mut ratatui::Frame, area: Rect, plan_item: &PlannedBlock, edit: &EditingBindings) {
+fn render_binding_popup(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    plan_item: &PlannedBlock,
+    edit: &EditingBindings,
+) {
     let popup = Rect {
         x: area.width / 6,
         y: area.height / 3,

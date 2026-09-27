@@ -183,7 +183,9 @@ pub fn tests_dir() -> PathBuf {
 
 /// Shared shape behind `{list,read,write,delete}_{test,block}`: each kind is
 /// just JSON files named `<slug>.json` in its own directory.
-fn list_json<T: serde::de::DeserializeOwned>(dir: &std::path::Path) -> anyhow::Result<Vec<(String, T)>> {
+fn list_json<T: serde::de::DeserializeOwned>(
+    dir: &std::path::Path,
+) -> anyhow::Result<Vec<(String, T)>> {
     if !dir.is_dir() {
         return Ok(Vec::new());
     }
@@ -202,16 +204,27 @@ fn list_json<T: serde::de::DeserializeOwned>(dir: &std::path::Path) -> anyhow::R
     Ok(items)
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(dir: &std::path::Path, slug: &str, kind: &str) -> anyhow::Result<T> {
+fn read_json<T: serde::de::DeserializeOwned>(
+    dir: &std::path::Path,
+    slug: &str,
+    kind: &str,
+) -> anyhow::Result<T> {
     let path = dir.join(format!("{slug}.json"));
     let raw = std::fs::read_to_string(&path)
         .map_err(|_| anyhow::anyhow!("{kind} '{slug}' not found at {}", path.display()))?;
     Ok(serde_json::from_str(&raw)?)
 }
 
-fn write_json<T: serde::Serialize>(dir: &std::path::Path, slug: &str, item: &T) -> anyhow::Result<()> {
+fn write_json<T: serde::Serialize>(
+    dir: &std::path::Path,
+    slug: &str,
+    item: &T,
+) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join(format!("{slug}.json")), serde_json::to_string_pretty(item)?)?;
+    std::fs::write(
+        dir.join(format!("{slug}.json")),
+        serde_json::to_string_pretty(item)?,
+    )?;
     Ok(())
 }
 

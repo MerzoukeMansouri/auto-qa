@@ -178,7 +178,9 @@ pub(crate) fn write_sdk_files(harness: Harness) -> anyhow::Result<PathBuf> {
 /// `write_sdk_files` plus a one-time `npm install` next to the script.
 fn ensure_sdk_script(harness: Harness) -> anyhow::Result<PathBuf> {
     let script_path = write_sdk_files(harness)?;
-    let dir = script_path.parent().expect("script lives in its runtime dir");
+    let dir = script_path
+        .parent()
+        .expect("script lives in its runtime dir");
     if !dir.join("node_modules").is_dir() {
         let status = std::process::Command::new("npm")
             .args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
@@ -867,4 +869,3 @@ mod tests {
         assert!(Harness::Gemini.log_filter().is_some());
     }
 }
-
