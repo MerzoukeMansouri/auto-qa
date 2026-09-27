@@ -1,0 +1,10 @@
+{
+  "name": "autoqa-jev-sdk",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@ai-sdk/gateway": "4.0.85",
+    "@modelcontextprotocol/sdk": "^1",
+    "ai": "7.0.105"
+  }
+}

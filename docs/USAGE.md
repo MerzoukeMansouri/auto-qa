@@ -40,6 +40,29 @@ own CLI installed and authenticated (`claude`, `copilot`, `opencode`, `codex`,
 agent loop against the Anthropic/Gemini API directly (no CLI subprocess),
 authenticated via `ANTHROPIC_API_KEY`/`GEMINI_API_KEY` instead.
 
+`jev-sdk` drives the browser with TypeSafe's Jev (`typesafe-ai/jev`) through
+Vercel AI Gateway, authenticated via `AI_GATEWAY_API_KEY`. Jev only picks
+from options it's given (no tool calls, no free text), so the loop is
+autoqa's own: pin the viewport to 1280×720, snapshot the page with element
+boxes, and send Jev only the visible text. Each step is one request split
+into a small `operation` choice (CLICK/TYPE/HOVER/WAIT/BLOCKED/DONE, only
+operations that have a candidate this turn) plus one target choice per
+operation, each holding only that operation's up-to-250 deduplicated elements
+(visible first, then offscreen; Jev's hard cap is 255 options per question) —
+same design as browser-use's jev-ultrafast. The same request also asks which
+element proves the previous action worked, recorded as a `browser_verify_*`.
+A target list over 100 options goes through a shortlist round (best of each
+group of 100, in parallel) and a final choice among the winners — large
+choices 5xx intermittently on the Gateway, and nothing gets dropped this way.
+A failed action isn't offered again, 3 failures in a row end the run, 3
+actions in a row with no visible page change also end the run, and WAIT isn't
+offered after 2 in a row. The last failing payload is kept in
+`~/.autoqa/jev-sdk/last-failed-request.json`. Field values come from a Gateway text model
+(`google/gemini-2.5-flash-lite`, override with `JEV_TEXT_MODEL`), which also
+answers `review`'s chat edits; a value survives a same-field retry without a
+second model call. Limits: the query must contain the start URL; blocks are
+not replayed; no scroll/drag/select-option/keypress beyond type-then-Enter.
+
 Resolution order for `run`/`review`, every time: an explicit `--harness` flag
 wins; otherwise the harness saved in `~/.autoqa/config.json` is used; if
 neither is set, you're prompted once (same picker as `autoqa config`) and the

@@ -16,7 +16,7 @@ use std::time::Duration;
 /// every place that needs to tell the two families apart routes through
 /// this single predicate rather than re-listing the variants.
 fn is_sdk_harness(h: Harness) -> bool {
-    matches!(h, Harness::ClaudeSdk | Harness::GeminiSdk)
+    matches!(h, Harness::ClaudeSdk | Harness::GeminiSdk | Harness::JevSdk)
 }
 
 /// Snapshot of what was detected on a prior `doctor::ensure` pass, scoped to
@@ -163,6 +163,7 @@ fn api_key_env_var(harness: Harness) -> &'static str {
     match harness {
         Harness::ClaudeSdk => "ANTHROPIC_API_KEY",
         Harness::GeminiSdk => "GEMINI_API_KEY",
+        Harness::JevSdk => "AI_GATEWAY_API_KEY",
         _ => unreachable!("api key check only applies to SDK harnesses"),
     }
 }
@@ -176,7 +177,7 @@ fn sdk_deps_ok(harness: Harness) -> bool {
         return true;
     }
     // `harness.to_string()` doubles as the runtime dir name for `*Sdk`
-    // variants — matches `ensure_claude_sdk_script`/`ensure_gemini_sdk_script`
+    // variants — matches `ensure_sdk_script`
     // in harness.rs, which extract each script into that same-named dir.
     state::runtime_dir()
         .join(harness.to_string())
@@ -447,6 +448,9 @@ fn run_checklist(harness: Harness) -> anyhow::Result<()> {
         )?;
     }
     if is_sdk_harness(harness) && !fresh.sdk_deps {
+        // Same as the block server above: the runtime dir doesn't exist until
+        // the embedded script is written out, and npm can't run in it before.
+        crate::harness::write_sdk_files(harness)?;
         run_install(
             &mut term,
             &mut rows,

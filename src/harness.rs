@@ -26,6 +26,7 @@ pub enum Harness {
     Codex,
     Gemini,
     GeminiSdk,
+    JevSdk,
 }
 
 pub const ALL: &[Harness] = &[
@@ -36,6 +37,7 @@ pub const ALL: &[Harness] = &[
     Harness::Codex,
     Harness::Gemini,
     Harness::GeminiSdk,
+    Harness::JevSdk,
 ];
 
 impl std::fmt::Display for Harness {
@@ -48,6 +50,7 @@ impl std::fmt::Display for Harness {
             Harness::Codex => "codex",
             Harness::Gemini => "gemini",
             Harness::GeminiSdk => "gemini-sdk",
+            Harness::JevSdk => "jev-sdk",
         };
         f.write_str(name)
     }
@@ -130,58 +133,48 @@ fn copy_codex_auth(dir: &std::path::Path) {
     }
 }
 
-/// `node/gemini-sdk` (own harness against the Gemini API directly, no
-/// `gemini` CLI subprocess) is embedded via `include_str!` — same reasoning
-/// as `block_server_mcp_spec` in agent.rs: a Homebrew install has no `node/`
+/// `node/<name>` sdk harness scripts (own loop against a model API directly,
+/// no CLI subprocess) are embedded via `include_str!` — same reasoning as
+/// `block_server_mcp_spec` in agent.rs: a Homebrew install has no `node/`
 /// dir alongside the binary, so the script has to be written out at runtime.
 /// `npm install` only runs once (skipped whenever `node_modules` already
 /// exists), so this stays cheap on every call after the first.
-fn ensure_gemini_sdk_script() -> anyhow::Result<PathBuf> {
-    let dir = state::runtime_dir().join("gemini-sdk");
+pub(crate) fn write_sdk_files(harness: Harness) -> anyhow::Result<PathBuf> {
+    let (package_json, script) = match harness {
+        Harness::ClaudeSdk => (
+            include_str!("../node/claude-sdk/package.json"),
+            include_str!("../node/claude-sdk/index.mjs"),
+        ),
+        Harness::GeminiSdk => (
+            include_str!("../node/gemini-sdk/package.json"),
+            include_str!("../node/gemini-sdk/index.mjs"),
+        ),
+        Harness::JevSdk => (
+            include_str!("../node/jev-sdk/package.json"),
+            include_str!("../node/jev-sdk/index.mjs"),
+        ),
+        _ => unreachable!("only *Sdk harnesses have a bundled script"),
+    };
+    // `harness.to_string()` doubles as the runtime dir name — doctor.rs's
+    // `sdk_deps_ok` checks that same dir.
+    let dir = state::runtime_dir().join(harness.to_string());
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(
-        dir.join("package.json"),
-        include_str!("../node/gemini-sdk/package.json"),
-    )?;
+    std::fs::write(dir.join("package.json"), package_json)?;
     let script_path = dir.join("index.mjs");
-    std::fs::write(&script_path, include_str!("../node/gemini-sdk/index.mjs"))?;
-
-    if !dir.join("node_modules").is_dir() {
-        let status = std::process::Command::new("npm")
-            .args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
-            .current_dir(&dir)
-            .status()?;
-        anyhow::ensure!(
-            status.success(),
-            "npm install for gemini-sdk harness failed"
-        );
-    }
+    std::fs::write(&script_path, script)?;
     Ok(script_path)
 }
 
-/// `node/claude-sdk` (own harness against the Claude Messages API directly —
-/// no `claude` CLI subprocess, and no Claude Agent SDK either, since that
-/// bundles and spawns the `claude-code` binary internally) is embedded via
-/// `include_str!`, same reasoning as `ensure_gemini_sdk_script`.
-fn ensure_claude_sdk_script() -> anyhow::Result<PathBuf> {
-    let dir = state::runtime_dir().join("claude-sdk");
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(
-        dir.join("package.json"),
-        include_str!("../node/claude-sdk/package.json"),
-    )?;
-    let script_path = dir.join("index.mjs");
-    std::fs::write(&script_path, include_str!("../node/claude-sdk/index.mjs"))?;
-
+/// `write_sdk_files` plus a one-time `npm install` next to the script.
+fn ensure_sdk_script(harness: Harness) -> anyhow::Result<PathBuf> {
+    let script_path = write_sdk_files(harness)?;
+    let dir = script_path.parent().expect("script lives in its runtime dir");
     if !dir.join("node_modules").is_dir() {
         let status = std::process::Command::new("npm")
             .args(["install", "--registry", state::NPM_PUBLIC_REGISTRY])
-            .current_dir(&dir)
+            .current_dir(dir)
             .status()?;
-        anyhow::ensure!(
-            status.success(),
-            "npm install for claude-sdk harness failed"
-        );
+        anyhow::ensure!(status.success(), "npm install for {harness} harness failed");
     }
     Ok(script_path)
 }
@@ -214,6 +207,7 @@ impl Harness {
             Harness::Claude => Some("haiku"),
             Harness::ClaudeSdk => Some("claude-haiku-4-5"),
             Harness::GeminiSdk => Some("gemini-3.6-flash"),
+            Harness::JevSdk => Some("typesafe-ai/jev"),
             Harness::Copilot | Harness::Opencode | Harness::Codex | Harness::Gemini => None,
         }
     }
@@ -235,6 +229,7 @@ impl Harness {
             Harness::Gemini | Harness::GeminiSdk => {
                 Some(&["gemini-3.6-flash", "gemini-3.5-flash-lite"])
             }
+            Harness::JevSdk => Some(&["typesafe-ai/jev"]),
             Harness::Copilot | Harness::Opencode | Harness::Codex => None,
         }
     }
@@ -300,15 +295,15 @@ impl Harness {
                     .current_dir(&dir);
                 Ok(cmd)
             }
-            Harness::ClaudeSdk => {
-                let dir = scratch_dir("claude-sdk-run");
+            Harness::ClaudeSdk | Harness::JevSdk => {
+                let dir = scratch_dir(&format!("{self}-run"));
                 std::fs::create_dir_all(&dir)?;
                 let system_prompt_path = dir.join("system.md");
                 std::fs::write(&system_prompt_path, system_prompt)?;
                 let mcp_config_path = dir.join("mcp-config.json");
                 std::fs::write(&mcp_config_path, mcp_config_json(mcp).to_string())?;
 
-                let script_path = ensure_claude_sdk_script()?;
+                let script_path = ensure_sdk_script(*self)?;
                 let mut cmd = std::process::Command::new("node");
                 cmd.arg(&script_path)
                     .arg(query)
@@ -320,7 +315,7 @@ impl Harness {
                     .arg(
                         model
                             .as_deref()
-                            .expect("ClaudeSdk always has a default_model"),
+                            .expect("*Sdk harnesses always have a default_model"),
                     );
                 Ok(cmd)
             }
@@ -471,7 +466,7 @@ impl Harness {
                 let mcp_config_path = dir.join("mcp-config.json");
                 std::fs::write(&mcp_config_path, mcp_config_json(mcp).to_string())?;
 
-                let script_path = ensure_gemini_sdk_script()?;
+                let script_path = ensure_sdk_script(*self)?;
                 let mut cmd = std::process::Command::new("node");
                 cmd.arg(&script_path)
                     .arg(query)
@@ -510,13 +505,13 @@ impl Harness {
                     .arg("");
                 Ok(cmd)
             }
-            Harness::ClaudeSdk => {
-                let dir = scratch_dir("claude-sdk-chat");
+            Harness::ClaudeSdk | Harness::JevSdk => {
+                let dir = scratch_dir(&format!("{self}-chat"));
                 std::fs::create_dir_all(&dir)?;
                 let system_prompt_path = dir.join("system.md");
                 std::fs::write(&system_prompt_path, system_prompt)?;
 
-                let script_path = ensure_claude_sdk_script()?;
+                let script_path = ensure_sdk_script(*self)?;
                 let mut cmd = std::process::Command::new("node");
                 // --raw: no MCP config, no decorative log lines — chat mode's
                 // caller (edit_actions_via_chat) parses stdout directly as
@@ -530,7 +525,7 @@ impl Harness {
                     .arg(
                         model
                             .as_deref()
-                            .expect("ClaudeSdk always has a default_model"),
+                            .expect("*Sdk harnesses always have a default_model"),
                     );
                 Ok(cmd)
             }
@@ -619,7 +614,7 @@ impl Harness {
                 let system_prompt_path = dir.join("system.md");
                 std::fs::write(&system_prompt_path, system_prompt)?;
 
-                let script_path = ensure_gemini_sdk_script()?;
+                let script_path = ensure_sdk_script(*self)?;
                 let mut cmd = std::process::Command::new("node");
                 // --raw: no MCP config, no decorative log lines — chat mode's
                 // caller (edit_actions_via_chat) parses stdout directly as
@@ -657,6 +652,7 @@ impl Harness {
             // Script prints its own final log format directly — no
             // undocumented schema to guess at, so raw passthrough.
             Harness::GeminiSdk => None,
+            Harness::JevSdk => None,
         }
     }
 }
@@ -855,6 +851,7 @@ mod tests {
         // Script owns its own log format directly, no schema to guess at.
         assert!(Harness::GeminiSdk.log_filter().is_none());
         assert!(Harness::ClaudeSdk.log_filter().is_none());
+        assert!(Harness::JevSdk.log_filter().is_none());
     }
 
     #[test]
