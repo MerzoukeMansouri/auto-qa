@@ -48,7 +48,7 @@ const VIEWPORT = { w: 1280, h: 720 };
 // example in a description moves confidence far more than rewording.
 const FIXED = {
   WAIT: "The page is still loading and the control the task needs is not offered yet. Example: a results list is empty right after a search was submitted.",
-  BLOCKED: "No offered operation can advance the task. Example: a CAPTCHA, an access-denied page, or a login wall the task gives no credentials for.",
+  BLOCKED: "No offered operation can advance the task. Example: a CAPTCHA, an access-denied page, or a login wall the task gives no credentials for. If the task supplies a username/password for this exact page, that is not BLOCKED — type/click through it instead.",
   DONE: "The current page visibly proves every requirement of the task. Example: for 'add todo X and complete it', X is listed and marked completed. Example: for 'add X and delete it', X's absence from the list (e.g. an updated or zero remaining-items count) is the proof — nothing needs to stay visible. An earlier click alone is not proof.",
   NONE: "No offered element proves the last action worked. Example: the click changed nothing visible on the page.",
 };
@@ -58,7 +58,8 @@ const ACTION_RULES =
   "HOVER an item to reveal controls that only appear on hover (e.g. a delete button) when the needed control is not offered. " +
   "Options marked offscreen are on the page but outside the viewport; they can still be used. " +
   "A checkbox/radio/switch/tab already showing the requested current state (checked, selected, pressed) does not need clicking again — pick DONE or a different element instead. " +
-  "Never submit payments, orders, or credentials.";
+  "If the task gives a username/password/credential for the current login page, type and submit it — logging in is part of the task, not something to refuse. " +
+  "Never submit payments or orders, and never invent or guess a credential value the task did not provide.";
 const VERIFY_QUESTION = "Which visible element best proves that lastAction achieved its purpose for the task? Example: after adding item X, the new list entry X.";
 const TARGET_RULES =
   "Choose the best offered element for this operation, using the task, current field values, and recent actions. " +
@@ -106,7 +107,11 @@ export function parseSnapshot(text, viewport = VIEWPORT) {
     if (!value && state) value = state[2] ? `${state[1]}=${state[2]}` : state[1];
     else if (!value && BOOLEAN_ROLES.has(role)) value = role === "option" || role === "tab" ? "not selected" : "unchecked";
     const ref = rest.match(/\[ref=([A-Za-z0-9_]+)\]/)?.[1];
-    if (ref) out.elements.push({ role, name: unquote(rawName ?? ""), value, ref, where });
+    // A styled <div onClick> with no ARIA role renders as role "generic" but
+    // still gets a [cursor=pointer] annotation — the only signal it's
+    // actually clickable (e.g. custom SSO "Next" buttons with no <button>).
+    const cursorPointer = /\[cursor=pointer\]/.test(rest);
+    if (ref) out.elements.push({ role, name: unquote(rawName ?? ""), value, ref, where, cursorPointer });
     else if (role === "text" && value) out.texts.push({ value, where });
   }
   return out;
@@ -131,8 +136,11 @@ export function firstUrl(query) {
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
 }
 
-function operationOf(role) {
-  return TYPEABLE.has(role) ? "TYPE" : CLICKABLE.has(role) ? "CLICK" : HOVERABLE.has(role) ? "HOVER" : null;
+function operationOf(role, cursorPointer) {
+  if (TYPEABLE.has(role)) return "TYPE";
+  if (CLICKABLE.has(role) || (role === "generic" && cursorPointer)) return "CLICK";
+  if (HOVERABLE.has(role)) return "HOVER";
+  return null;
 }
 
 // One label per operation that actually has a target this turn — Jev never
@@ -158,7 +166,7 @@ export function actionSpace(elements, canFinish, failed = new Set(), canWait = t
   const seen = { CLICK: new Set(), TYPE: new Set(), HOVER: new Set() };
   const ranked = [...elements].sort((a, b) => (a.where === "visible" ? 0 : 1) - (b.where === "visible" ? 0 : 1));
   for (const e of ranked) {
-    const op = operationOf(e.role);
+    const op = operationOf(e.role, e.cursorPointer);
     if (!op || e.where === "hidden" || (!e.name && op !== "TYPE") || Object.keys(targets[op]).length >= MAX_OPTIONS) continue;
     const desc =
       `${e.role}${e.name ? ` "${e.name}"` : ""}${e.value ? ` (current: ${truncate(e.value, 60)})` : ""}` +

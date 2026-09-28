@@ -15,6 +15,7 @@ const SNAP = `### Page
     - /url: https://todomvc.com/
   - checkbox "Toggle Todo" [ref=f3e20] [box=10,160,20,20]
   - checkbox "Toggle Todo" [ref=f3e21] [box=10,190,20,20] [checked]
+  - generic "Suivant" [ref=e50] [cursor=pointer] [box=100,400,80,30]
   - listitem [ref=e30] [box=10,160,500,30]:
     - text: Buy milk
   - contentinfo [ref=e40] [box=0,2000,1280,100]:
@@ -26,8 +27,11 @@ test("snapshot to Jev state and options", () => {
   const p = parseSnapshot(SNAP);
   assert.equal(p.url, "https://demo.playwright.dev/todomvc/#/");
   const byRef = Object.fromEntries(p.elements.map((e) => [e.ref, e]));
-  assert.deepEqual(byRef.f3e8, { role: "textbox", name: "What needs to be done?", value: "Buy milk", ref: "f3e8", where: "visible" });
+  assert.deepEqual(byRef.f3e8, { role: "textbox", name: "What needs to be done?", value: "Buy milk", ref: "f3e8", where: "visible", cursorPointer: false });
   assert.equal(byRef.e3.name, 'real "TodoMVC" app.');
+  // A styled div with no ARIA role but a pointer cursor is a de-facto button
+  // (e.g. a custom SSO "Next" control) — must not be silently unclickable.
+  assert.equal(byRef.e50.cursorPointer, true);
   assert.equal(byRef.e2.where, "hidden");
   assert.equal(byRef.e41.where, "below");
   // [checked] is a bare annotation (true) or simply absent (false); both must
@@ -48,7 +52,7 @@ test("snapshot to Jev state and options", () => {
   // Hidden skip link dropped, offscreen kept last and labeled; the two
   // "Toggle Todo" checkboxes are NOT collapsed — their checked state differs.
   assert.deepEqual(Object.keys(s.targets.TYPE), ["f3e8"]);
-  assert.deepEqual(Object.keys(s.targets.CLICK), ["e3", "f3e20", "f3e21", "e41"]);
+  assert.deepEqual(Object.keys(s.targets.CLICK), ["e3", "f3e20", "f3e21", "e50", "e41"]);
   assert.match(s.targets.CLICK.f3e20, /current: unchecked/);
   assert.match(s.targets.CLICK.f3e21, /current: checked/);
   assert.match(s.targets.CLICK.e41, /offscreen, below/);
